@@ -16,9 +16,33 @@
 #include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "EdGraphSchema_K2.h"
+#include "UObject/UObjectGlobals.h"
 
 // Declare the log category
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealMCP, Log, All);
+
+namespace
+{
+    UClass* FindLoadedClassByName(const FString& ClassName)
+    {
+        return FindFirstObject<UClass>(
+            *ClassName,
+            EFindFirstObjectOptions::NativeFirst,
+            ELogVerbosity::NoLogging,
+            TEXT("UEMCP Blueprint node class lookup")
+        );
+    }
+
+    UClass* FindLoadedClassByName(const TCHAR* ClassName)
+    {
+        return FindFirstObject<UClass>(
+            ClassName,
+            EFindFirstObjectOptions::NativeFirst,
+            ELogVerbosity::NoLogging,
+            TEXT("UEMCP Blueprint node class lookup")
+        );
+    }
+}
 
 FUnrealMCPBlueprintNodeCommands::FUnrealMCPBlueprintNodeCommands()
 {
@@ -320,7 +344,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         UClass* TargetClass = nullptr;
         
         // First try without a prefix
-        TargetClass = FindObject<UClass>(ANY_PACKAGE, *Target);
+        TargetClass = FindLoadedClassByName(Target);
         UE_LOG(LogTemp, Display, TEXT("Tried to find class '%s': %s"), 
                *Target, TargetClass ? TEXT("Found") : TEXT("Not found"));
         
@@ -328,7 +352,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         if (!TargetClass && !Target.StartsWith(TEXT("U")))
         {
             FString TargetWithPrefix = FString(TEXT("U")) + Target;
-            TargetClass = FindObject<UClass>(ANY_PACKAGE, *TargetWithPrefix);
+            TargetClass = FindLoadedClassByName(TargetWithPrefix);
             UE_LOG(LogTemp, Display, TEXT("Tried to find class '%s': %s"), 
                    *TargetWithPrefix, TargetClass ? TEXT("Found") : TEXT("Not found"));
         }
@@ -343,7 +367,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
             
             for (const FString& ClassName : PossibleClassNames)
             {
-                TargetClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
+                TargetClass = FindLoadedClassByName(ClassName);
                 if (TargetClass)
                 {
                     UE_LOG(LogTemp, Display, TEXT("Found class using alternative name '%s'"), *ClassName);
@@ -356,7 +380,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         if (!TargetClass && Target == TEXT("UGameplayStatics"))
         {
             // For UGameplayStatics, use a direct reference to known class
-            TargetClass = FindObject<UClass>(ANY_PACKAGE, TEXT("UGameplayStatics"));
+            TargetClass = FindLoadedClassByName(TEXT("UGameplayStatics"));
             if (!TargetClass)
             {
                 // Try loading it from its known package
@@ -503,7 +527,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
                             const FString& ClassName = StringVal;
                             
                             // TODO: This likely won't work in UE5.5+, so don't rely on it.
-                            UClass* Class = FindObject<UClass>(ANY_PACKAGE, *ClassName);
+                            UClass* Class = FindLoadedClassByName(ClassName);
 
                             if (!Class)
                             {
@@ -921,4 +945,4 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleFindBlueprintNode
     ResultObj->SetArrayField(TEXT("node_guids"), NodeGuidArray);
     
     return ResultObj;
-} 
+}
