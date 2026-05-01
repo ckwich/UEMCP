@@ -1,0 +1,1 @@
+"""Bundled UEMCP project profiles."""

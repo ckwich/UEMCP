@@ -9,6 +9,9 @@
 #include "Misc/FileHelper.h"
 #include "GameFramework/Actor.h"
 #include "Engine/Selection.h"
+#include "Misc/App.h"
+#include "Misc/EngineVersion.h"
+#include "Misc/Paths.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/DirectionalLight.h"
@@ -20,6 +23,12 @@
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "UObject/UObjectIterator.h"
+
+namespace
+{
+    constexpr const TCHAR* UEMCPPluginVersion = TEXT("0.1.0");
+}
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -27,8 +36,17 @@ FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
+    // Read-only observability commands
+    if (CommandType == TEXT("get_editor_status"))
+    {
+        return HandleGetEditorStatus(Params);
+    }
+    else if (CommandType == TEXT("get_output_log"))
+    {
+        return HandleGetOutputLog(Params);
+    }
     // Actor manipulation commands
-    if (CommandType == TEXT("get_actors_in_level"))
+    else if (CommandType == TEXT("get_actors_in_level"))
     {
         return HandleGetActorsInLevel(Params);
     }
@@ -76,6 +94,92 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetEditorStatus(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+
+    ResultObj->SetStringField(TEXT("plugin_version"), UEMCPPluginVersion);
+    ResultObj->SetStringField(TEXT("engine_version"), FEngineVersion::Current().ToString());
+    ResultObj->SetStringField(TEXT("project_name"), FApp::GetProjectName());
+    ResultObj->SetStringField(TEXT("project_path"), FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()));
+
+    UWorld* EditorWorld = nullptr;
+    if (GEditor)
+    {
+        EditorWorld = GEditor->GetEditorWorldContext().World();
+    }
+
+    FString CurrentMap;
+    if (EditorWorld)
+    {
+        CurrentMap = EditorWorld->GetOutermost() ? EditorWorld->GetOutermost()->GetName() : EditorWorld->GetMapName();
+    }
+    ResultObj->SetStringField(TEXT("current_map"), CurrentMap);
+
+    ResultObj->SetBoolField(TEXT("is_pie_running"), GEditor && GEditor->PlayWorld != nullptr);
+    ResultObj->SetNumberField(TEXT("selected_actor_count"), GEditor ? GEditor->GetSelectedActorCount() : 0);
+
+    int32 DirtyPackageCount = 0;
+    for (TObjectIterator<UPackage> PackageIt; PackageIt; ++PackageIt)
+    {
+        if (PackageIt->IsDirty())
+        {
+            ++DirtyPackageCount;
+        }
+    }
+    ResultObj->SetNumberField(TEXT("dirty_package_count"), DirtyPackageCount);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetOutputLog(const TSharedPtr<FJsonObject>& Params)
+{
+    double RequestedLimit = 200.0;
+    if (Params->HasField(TEXT("limit")))
+    {
+        Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+    }
+    const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+    FString Category;
+    Params->TryGetStringField(TEXT("category"), Category);
+
+    FString Verbosity;
+    Params->TryGetStringField(TEXT("verbosity"), Verbosity);
+
+    FString Contains;
+    Params->TryGetStringField(TEXT("contains"), Contains);
+
+    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+    FiltersObj->SetNumberField(TEXT("limit"), Limit);
+    if (!Category.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("category"), Category);
+    }
+    if (!Verbosity.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("verbosity"), Verbosity);
+    }
+    if (!Contains.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("contains"), Contains);
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Entries;
+    TArray<TSharedPtr<FJsonValue>> Warnings;
+    Warnings.Add(MakeShared<FJsonValueString>(
+        TEXT("Historical output log capture is not wired yet; this command returns the bounded response shape only.")
+    ));
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("entries"), Entries);
+    ResultObj->SetBoolField(TEXT("truncated"), false);
+    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+    ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params)
@@ -597,4 +701,4 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleTakeScreenshot(const TSh
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to take screenshot"));
-} 
+}

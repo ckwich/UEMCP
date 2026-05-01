@@ -1,8 +1,4 @@
-"""
-Unreal Engine MCP Server
-
-A simple MCP server for interacting with Unreal Engine.
-"""
+"""UEMCP server for Unreal Engine editor integration."""
 
 import logging
 import socket
@@ -271,8 +267,10 @@ from tools.blueprint_tools import register_blueprint_tools
 from tools.node_tools import register_blueprint_node_tools
 from tools.project_tools import register_project_tools
 from tools.umg_tools import register_umg_tools
+from tools.observability_tools import register_observability_tools
 
 # Register tools
+register_observability_tools(mcp)
 register_editor_tools(mcp)
 register_blueprint_tools(mcp)
 register_blueprint_node_tools(mcp)
@@ -374,4 +372,4 @@ def info():
 # Run the server
 if __name__ == "__main__":
     logger.info("Starting MCP server with stdio transport")
-    mcp.run(transport='stdio') 
+    mcp.run(transport='stdio')

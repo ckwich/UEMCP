@@ -1,16 +1,21 @@
 [project]
-name = "unreal-mcp"
+name = "uemcp"
 version = "0.1.0"
-description = "Unreal MCP Server: A server for Unreal Engine integration via the Model Context Protocol (MCP)."
+description = "UEMCP: observability-first Unreal Engine integration via the Model Context Protocol."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "mcp[cli]>=1.4.1",
-  "fastmcp>=0.2.0",
+  "mcp[cli]>=1.5.0,<1.6.0",
+  "fastmcp>=0.4.1,<0.5.0",
   "uvicorn",
   "fastapi",
   "pydantic>=2.6.1",
   "requests"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0"
 ]
 
 [build-system]
@@ -18,5 +23,11 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# The main server script is a single-file module
-py-modules = ["unreal_mcp_server"] 
+py-modules = ["unreal_mcp_server", "uemcp_observability"]
+packages = ["tools", "profiles"]
+
+[tool.setuptools.package-data]
+profiles = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

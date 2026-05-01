@@ -1,6 +1,6 @@
-# Unreal MCP
+# UEMCP
 
-Python bridge for interacting with Unreal Engine 5.5 using the Model Context Protocol (MCP).
+Observability-first Python MCP bridge for interacting with Unreal Engine through the UEMCP editor plugin.
 
 ## Setup
 
@@ -18,10 +18,21 @@ Python bridge for interacting with Unreal Engine 5.5 using the Model Context Pro
    ```
 4. Install dependencies:
    ```bash
-   uv pip install -e .
+   uv sync --extra dev
    ```
 
-At this point, you can configure your MCP Client (Claude Desktop, Cursor, Windsurf) to use the Unreal MCP Server as per the [Configuring your MCP Client](README.md#configuring-your-mcp-client).
+At this point, configure your MCP client to run `uv --directory C:/Dev/UEMCP/Python run unreal_mcp_server.py`.
+
+## Observability Tools
+
+The first supported UEMCP tools are read-mostly:
+
+- `uemcp_ping`
+- `get_editor_status`
+- `get_output_log`
+- `get_failstate_context`
+
+These tools return structured envelopes with request IDs, timing, editor identity, warnings, and categorized errors.
 
 ## Testing Scripts
 
@@ -30,6 +41,14 @@ There are several scripts in the [scripts](./scripts) folder. They are useful fo
 You should make sure you have installed dependencies and/or are running in the `uv` virtual environment in order for the scripts to work.
 
 
+## Validation
+
+```bash
+uv lock --check
+uv run --extra dev pytest -q
+uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
+```
+
 ## Troubleshooting
 
 - Make sure Unreal Engine editor is loaded loaded and running before running the server.
@@ -37,4 +56,4 @@ You should make sure you have installed dependencies and/or are running in the `
 
 ## Development
 
-To add new tools, modify the `UnrealMCPBridge.py` file to add new command handlers, and update the `unreal_mcp_server.py` file to expose them through the HTTP API. 
+Add Python MCP tools under `tools/`, keep read-only observability separate from mutating editor commands, and add pytest coverage before implementation.

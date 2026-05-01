@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "unrealMCP": {
+    "uemcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "absolute/path/to/this/repository/Python",
+        "C:/Dev/UEMCP/Python",
         "run",
         "unreal_mcp_server.py"
       ]
