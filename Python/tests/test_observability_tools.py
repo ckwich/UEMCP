@@ -1,6 +1,7 @@
 from tools.observability_tools import (
     build_automation_test_run,
     build_automation_tests,
+    build_editor_automation_readiness_diagnostic,
     build_editor_status,
     build_editor_readiness,
     build_failstate_context,
@@ -381,6 +382,153 @@ def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
             },
         )
     ]
+
+
+def test_build_editor_automation_readiness_diagnostic_returns_ready_summary_with_evidence():
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "message": "pong",
+                    "plugin_version": "0.1.0",
+                    "engine_version": "5.7",
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "project_path": "C:/Dev/Failstate/Failstate.uproject",
+                    "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "project_path": "C:/Dev/Failstate/Failstate.uproject",
+                    "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "entries": [{"category": "LogTemp", "message": "ready"}],
+                    "truncated": False,
+                    "matched_entry_count": 1,
+                },
+            },
+        ]
+    )
+
+    envelope = build_editor_automation_readiness_diagnostic(
+        lambda: connection,
+        readiness_stable_samples=1,
+        output_log_limit=2,
+    )
+
+    data = envelope["data"]
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "diagnose_editor_automation_readiness"
+    assert data["ready_for_automation"] is True
+    assert data["summary"] == {
+        "state": "ready",
+        "first_blocking_category": None,
+        "first_blocking_message": None,
+    }
+    assert data["gates"]["bridge"]["ok"] is True
+    assert data["gates"]["status"]["ok"] is True
+    assert data["gates"]["readiness"]["ready"] is True
+    assert data["gates"]["output_log"]["ok"] is True
+    assert data["gates"]["output_log"]["entry_count"] == 1
+    assert data["observability_events"] == []
+    assert data["evidence_refs"]["ping_request_id"].startswith("uemcp_ping-")
+    assert data["evidence_refs"]["status_request_id"].startswith("get_editor_status-")
+    assert data["evidence_refs"]["readiness_request_id"].startswith("get_editor_readiness-")
+    assert data["evidence_refs"]["output_log_request_id"].startswith("get_output_log-")
+    assert connection.calls == [
+        ("ping", {}),
+        ("get_editor_status", {}),
+        ("get_editor_status", {}),
+        ("get_output_log", {"limit": 2}),
+    ]
+
+
+def test_build_editor_automation_readiness_diagnostic_reports_editor_busy_event():
+    connection = SequenceUnrealConnection(
+        [
+            {"status": "success", "result": {"message": "pong"}},
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": True,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": True,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "entries": [],
+                    "truncated": False,
+                    "matched_entry_count": 0,
+                },
+            },
+        ]
+    )
+
+    envelope = build_editor_automation_readiness_diagnostic(
+        lambda: connection,
+        output_log_limit=1,
+    )
+
+    data = envelope["data"]
+    event = data["observability_events"][0]
+    assert envelope["ok"] is True
+    assert data["ready_for_automation"] is False
+    assert data["summary"]["state"] == "blocked"
+    assert data["summary"]["first_blocking_category"] == "editor_busy"
+    assert data["gates"]["readiness"]["failure_category"] == "editor_busy"
+    assert data["gates"]["readiness"]["blocking_reasons"] == ["play_in_editor_running"]
+    assert event["type"] == "readiness_gate_failed"
+    assert event["phase"] == "diagnostic_readiness"
+    assert event["failure_category"] == "editor_busy"
+    assert event["blocking_reasons"] == ["play_in_editor_running"]
+
+
+def test_build_editor_automation_readiness_diagnostic_preserves_connection_failure():
+    envelope = build_editor_automation_readiness_diagnostic(
+        lambda: None,
+        output_log_limit=1,
+    )
+
+    data = envelope["data"]
+    event = data["observability_events"][0]
+    assert envelope["ok"] is True
+    assert data["ready_for_automation"] is False
+    assert data["summary"]["state"] == "blocked"
+    assert data["summary"]["first_blocking_category"] == "connection_failed"
+    assert data["gates"]["bridge"]["ok"] is False
+    assert data["gates"]["status"]["ok"] is False
+    assert data["gates"]["readiness"]["failure_category"] == "connection_failed"
+    assert data["gates"]["output_log"]["ok"] is False
+    assert event["phase"] == "diagnostic_readiness"
+    assert event["failure_category"] == "connection_failed"
+    assert data["evidence_refs"]["ping_request_id"].startswith("uemcp_ping-")
+    assert data["evidence_refs"]["status_request_id"].startswith("get_editor_status-")
+    assert data["evidence_refs"]["readiness_request_id"].startswith("get_editor_readiness-")
+    assert data["evidence_refs"]["output_log_request_id"].startswith("get_output_log-")
 
 
 def test_build_profile_automation_run_blocks_when_editor_is_not_ready():

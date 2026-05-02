@@ -138,6 +138,7 @@ from pathlib import Path
 from tools.observability_tools import (
     build_automation_test_run,
     build_automation_tests,
+    build_editor_automation_readiness_diagnostic,
     build_editor_readiness,
     build_editor_status,
     build_failstate_context,
@@ -167,6 +168,16 @@ checks.append(
     )
 )
 checks.append(("get_failstate_context", build_failstate_context()))
+checks.append(
+    (
+        "diagnose_editor_automation_readiness",
+        build_editor_automation_readiness_diagnostic(
+            readiness_timeout_seconds=60,
+            readiness_stable_samples=2,
+            output_log_limit=5,
+        ),
+    )
+)
 checks.append(
     (
         "get_editor_readiness_before_discovery",
@@ -255,6 +266,40 @@ output_log = dict(check_results["get_output_log"].get("data") or {})
 output_log_entries = output_log.get("entries") or []
 if not output_log_entries:
     failures.append("get_output_log returned no entries; expected live captured log entries")
+
+diagnostic = dict(check_results["diagnose_editor_automation_readiness"].get("data") or {})
+diagnostic_summary = dict(diagnostic.get("summary") or {})
+diagnostic_gates = dict(diagnostic.get("gates") or {})
+if diagnostic.get("ready_for_automation") is not True:
+    failures.append(f"diagnose_editor_automation_readiness did not report ready: {diagnostic}")
+if diagnostic_summary.get("state") != "ready":
+    failures.append(
+        "diagnose_editor_automation_readiness returned unexpected summary state: "
+        f"{diagnostic_summary}"
+    )
+for gate_name in ("bridge", "status", "readiness", "output_log"):
+    gate = dict(diagnostic_gates.get(gate_name) or {})
+    if gate.get("ok") is not True:
+        failures.append(f"diagnose_editor_automation_readiness gate {gate_name!r} failed: {gate}")
+if (diagnostic_gates.get("readiness") or {}).get("ready") is not True:
+    failures.append(
+        "diagnose_editor_automation_readiness readiness gate did not report ready: "
+        f"{diagnostic_gates.get('readiness')}"
+    )
+if diagnostic.get("observability_events") != []:
+    failures.append(
+        "diagnose_editor_automation_readiness returned unexpected observability events: "
+        f"{diagnostic.get('observability_events')}"
+    )
+diagnostic_refs = dict(diagnostic.get("evidence_refs") or {})
+for ref_name in (
+    "ping_request_id",
+    "status_request_id",
+    "readiness_request_id",
+    "output_log_request_id",
+):
+    if not diagnostic_refs.get(ref_name):
+        failures.append(f"diagnose_editor_automation_readiness missing evidence ref {ref_name}")
 
 placeholder_warning = "Historical output log capture is not wired yet"
 for warning in output_log.get("warnings") or []:

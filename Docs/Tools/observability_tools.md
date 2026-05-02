@@ -49,6 +49,29 @@ The response includes:
 - `latest_status`: the latest `get_editor_status` payload.
 - `samples`: the most recent bounded readiness samples, each including status request id, current map, PIE state, slow-task state, and blocking reasons.
 
+## diagnose_editor_automation_readiness
+
+Runs a read-only diagnostic pass before any automation test is started. This is a Python composition over `uemcp_ping`, `get_editor_status`, `get_editor_readiness`, and optionally `get_output_log`.
+
+Parameters:
+
+- `readiness_timeout_seconds`: optional readiness wait budget, clamped from 0 to 300 seconds. `0` takes a single snapshot.
+- `readiness_stable_samples`: consecutive ready samples required by the readiness gate, clamped from 1 to 10.
+- `readiness_poll_interval_seconds`: delay between readiness samples when waiting, clamped from 0 to 10 seconds.
+- `readiness_settle_seconds`: optional duration the editor must remain ready after the first ready sample, clamped from 0 to 120 seconds.
+- `output_log_limit`: output log sample size, clamped from 0 to 1000. `0` skips the output-log gate.
+
+The response includes:
+
+- `ready_for_automation`: true only when the bridge, status, readiness, and output-log gates all pass.
+- `summary`: compact `state`, `first_blocking_category`, and `first_blocking_message`.
+- `gates`: per-gate status for `bridge`, `status`, `readiness`, and `output_log`.
+- `readiness`: compact readiness evidence using the same shape as profile automation readiness.
+- `observability_events`: normalized events when the diagnostic finds a blocking condition. Successful diagnostics return an empty list.
+- `evidence_refs`: request ids for the ping, status, readiness, and output-log checks.
+
+This tool does not list or run automation tests. Use it as the cheapest first check when an agent needs to decide whether automation is safe to start.
+
 ## get_output_log
 
 Requests bounded output log data from the editor bridge. The Unreal plugin registers a thread-safe in-memory `GLog` output device during module startup and keeps the newest 2048 entries available for MCP queries.
@@ -172,7 +195,7 @@ Use the repo smoke script to prove the editor-target build, bridge listener, and
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 ```
 
-The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
+The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
 The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 

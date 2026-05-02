@@ -160,7 +160,11 @@ def _readiness_status_request_ids(readiness: Dict[str, Any]) -> List[str]:
     return request_ids
 
 
-def _readiness_failure_event(readiness: Dict[str, Any]) -> Dict[str, Any]:
+def _readiness_failure_event(
+    readiness: Dict[str, Any],
+    *,
+    phase: str = "profile_automation_preflight",
+) -> Dict[str, Any]:
     blocking_reasons = list(readiness.get("blocking_reasons") or ["editor_status_unavailable"])
     status_request_ids = _readiness_status_request_ids(readiness)
     failure_category = _readiness_failure_category(readiness)
@@ -174,7 +178,7 @@ def _readiness_failure_event(readiness: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "type": "readiness_gate_failed",
-        "phase": "profile_automation_preflight",
+        "phase": phase,
         "severity": "error",
         "failure_category": failure_category,
         "state": readiness.get("state"),
@@ -186,6 +190,62 @@ def _readiness_failure_event(readiness: Dict[str, Any]) -> Dict[str, Any]:
         "evidence_refs": {
             "readiness_request_id": readiness.get("readiness_request_id"),
             "status_request_ids": status_request_ids,
+        },
+    }
+
+
+def _error_category(envelope: Dict[str, Any]) -> Optional[str]:
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        category = error.get("category")
+        return str(category) if category else None
+    return None
+
+
+def _error_message(envelope: Dict[str, Any]) -> Optional[str]:
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        return str(message) if message else None
+    return None
+
+
+def _diagnostic_gate(
+    envelope: Dict[str, Any],
+    *,
+    name: str,
+    message: str,
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    gate = {
+        "name": name,
+        "ok": bool(envelope.get("ok")),
+        "request_id": envelope.get("request_id"),
+        "category": None,
+        "message": None,
+    }
+    if gate["ok"]:
+        gate["message"] = message
+    else:
+        gate["category"] = _error_category(envelope)
+        gate["message"] = _error_message(envelope)
+    gate.update(data or {})
+    return gate
+
+
+def _diagnostic_gate_event(gate: Dict[str, Any], *, phase: str) -> Dict[str, Any]:
+    category = gate.get("category") or "internal_error"
+    message = gate.get("message") or f"Diagnostic gate failed: {gate.get('name')}"
+    return {
+        "type": "diagnostic_gate_failed",
+        "phase": phase,
+        "severity": "error",
+        "failure_category": category,
+        "gate": gate.get("name"),
+        "message": message,
+        "request_id": gate.get("request_id"),
+        "evidence_refs": {
+            f"{gate.get('name')}_request_id": gate.get("request_id"),
         },
     }
 
@@ -397,6 +457,168 @@ def build_automation_test_run(
     )
 
 
+def build_editor_automation_readiness_diagnostic(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    readiness_timeout_seconds: float = 0.0,
+    readiness_stable_samples: int = 1,
+    readiness_poll_interval_seconds: float = 1.0,
+    readiness_settle_seconds: float = 0.0,
+    output_log_limit: int = 5,
+) -> Dict[str, Any]:
+    started_at = utc_now()
+    bounded_output_log_limit = max(0, min(int(output_log_limit), 1000))
+
+    ping_envelope = build_uemcp_ping(connection_factory)
+    status_envelope = build_editor_status(connection_factory)
+    readiness_envelope = build_editor_readiness(
+        connection_factory,
+        timeout_seconds=readiness_timeout_seconds,
+        stable_samples=readiness_stable_samples,
+        poll_interval_seconds=readiness_poll_interval_seconds,
+        settle_seconds=readiness_settle_seconds,
+    )
+
+    if bounded_output_log_limit:
+        output_log_envelope = build_output_log(
+            connection_factory,
+            limit=bounded_output_log_limit,
+        )
+        output_log_data = dict(output_log_envelope.get("data") or {})
+        output_log_gate = _diagnostic_gate(
+            output_log_envelope,
+            name="output_log",
+            message="Output log capture is available",
+            data={
+                "entry_count": len(output_log_data.get("entries") or []),
+                "matched_entry_count": output_log_data.get("matched_entry_count"),
+                "truncated": output_log_data.get("truncated"),
+                "skipped": False,
+            },
+        )
+        output_log_request_id = output_log_envelope.get("request_id")
+    else:
+        output_log_gate = {
+            "name": "output_log",
+            "ok": True,
+            "request_id": None,
+            "category": None,
+            "message": "Output log capture skipped",
+            "entry_count": None,
+            "matched_entry_count": None,
+            "truncated": None,
+            "skipped": True,
+        }
+        output_log_request_id = None
+
+    status_data = dict(status_envelope.get("data") or {})
+    readiness = _compact_readiness_result(readiness_envelope)
+    readiness_ready = bool(readiness.get("ready"))
+    readiness_gate = {
+        "name": "readiness",
+        "ok": bool(readiness_envelope.get("ok")),
+        "request_id": readiness.get("readiness_request_id"),
+        "ready": readiness_ready,
+        "state": readiness.get("state"),
+        "blocking_reasons": list(readiness.get("blocking_reasons") or []),
+        "failure_category": None if readiness_ready else _readiness_failure_category(readiness),
+        "message": "Editor is ready for automation" if readiness_ready else None,
+        "latest_status_request_id": (
+            _readiness_status_request_ids(readiness)[-1]
+            if _readiness_status_request_ids(readiness)
+            else None
+        ),
+    }
+
+    bridge_gate = _diagnostic_gate(
+        ping_envelope,
+        name="bridge",
+        message="Editor bridge is reachable",
+    )
+    status_gate = _diagnostic_gate(
+        status_envelope,
+        name="status",
+        message="Editor status is available",
+        data={
+            "current_map": status_data.get("current_map"),
+            "is_pie_running": status_data.get("is_pie_running"),
+            "is_slow_task_active": status_data.get("is_slow_task_active"),
+        },
+    )
+
+    observability_events: List[Dict[str, Any]] = []
+    if not readiness_ready:
+        readiness_event = _readiness_failure_event(readiness, phase="diagnostic_readiness")
+        readiness_gate["message"] = readiness_event["message"]
+        observability_events.append(readiness_event)
+
+    gate_order = [bridge_gate, status_gate, readiness_gate, output_log_gate]
+    first_blocking_category = None
+    first_blocking_message = None
+    for gate in gate_order:
+        gate_blocks = not gate.get("ok") or (
+            gate.get("name") == "readiness" and not gate.get("ready")
+        )
+        if gate_blocks:
+            first_blocking_category = (
+                gate.get("failure_category") or gate.get("category") or "internal_error"
+            )
+            first_blocking_message = gate.get("message")
+            break
+
+    if first_blocking_category is None and not output_log_gate.get("ok"):
+        first_blocking_category = output_log_gate.get("category") or "internal_error"
+        first_blocking_message = output_log_gate.get("message")
+
+    if not output_log_gate.get("ok"):
+        observability_events.append(
+            _diagnostic_gate_event(output_log_gate, phase="diagnostic_output_log")
+        )
+
+    ready_for_automation = (
+        bool(bridge_gate.get("ok"))
+        and bool(status_gate.get("ok"))
+        and readiness_ready
+        and bool(output_log_gate.get("ok"))
+    )
+    if ready_for_automation:
+        state = "ready"
+    elif readiness_ready and not output_log_gate.get("ok"):
+        state = "degraded"
+    else:
+        state = "blocked"
+
+    data = {
+        "ready_for_automation": ready_for_automation,
+        "summary": {
+            "state": state,
+            "first_blocking_category": first_blocking_category,
+            "first_blocking_message": first_blocking_message,
+        },
+        "gates": {
+            "bridge": bridge_gate,
+            "status": status_gate,
+            "readiness": readiness_gate,
+            "output_log": output_log_gate,
+        },
+        "readiness": readiness,
+        "observability_events": observability_events,
+        "evidence_refs": {
+            "ping_request_id": ping_envelope.get("request_id"),
+            "status_request_id": status_envelope.get("request_id"),
+            "readiness_request_id": readiness.get("readiness_request_id"),
+            "output_log_request_id": output_log_request_id,
+        },
+    }
+
+    return build_success_envelope(
+        tool="diagnose_editor_automation_readiness",
+        started_at=started_at,
+        data=data,
+        editor=_editor_identity(status_data or readiness.get("latest_status") or {}),
+    )
+
+
 def build_profile_automation_run(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -596,6 +818,24 @@ def register_observability_tools(mcp: FastMCP):
             stable_samples=stable_samples,
             poll_interval_seconds=poll_interval_seconds,
             settle_seconds=settle_seconds,
+        )
+
+    @mcp.tool()
+    def diagnose_editor_automation_readiness(
+        ctx: Context,
+        readiness_timeout_seconds: float = 0.0,
+        readiness_stable_samples: int = 1,
+        readiness_poll_interval_seconds: float = 1.0,
+        readiness_settle_seconds: float = 0.0,
+        output_log_limit: int = 5,
+    ) -> Dict[str, Any]:
+        """Return a compact read-only diagnostic summary before automation runs."""
+        return build_editor_automation_readiness_diagnostic(
+            readiness_timeout_seconds=readiness_timeout_seconds,
+            readiness_stable_samples=readiness_stable_samples,
+            readiness_poll_interval_seconds=readiness_poll_interval_seconds,
+            readiness_settle_seconds=readiness_settle_seconds,
+            output_log_limit=output_log_limit,
         )
 
     @mcp.tool()
