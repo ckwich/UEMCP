@@ -93,6 +93,27 @@ Each entry includes `sequence`, `recorded_at`, `tool`, `request_id`, `ok`, compa
 
 This tool intentionally does not record its own reads. Use it when an agent needs to inspect the last readiness, diagnostic, or profile-run outcome without rerunning checks or starting automation.
 
+## summarize_observability_state
+
+Returns the latest actionable state derived from the same in-process history used by `get_observability_recent_events`. It does not query Unreal Editor and does not record its own reads.
+
+Parameters:
+
+- `tool`: optional tool-name filter before summarizing, such as `run_profile_automation_tests`.
+- `limit`: maximum recent history entries to inspect, clamped from 1 to 100.
+
+The response includes:
+
+- `state`: `unknown` when no matching history exists, `ready` when the newest matching entry is successful, `blocked` when the newest matching entry is a readiness/diagnostic/preflight blocker, or `failing` when the newest matching entry is an automation result failure.
+- `message`: readable latest state or blocker message.
+- `latest_entry`: newest matching history entry.
+- `latest_blocker`: newest matching entry when it is currently unsuccessful; stale failures are ignored after a newer success.
+- `latest_success`: newest successful matching entry.
+- `recommended_next_step`: a compact suggested tool/reason for `unknown`, `blocked`, or `failing` states.
+- `counts`, `history_capacity`, and `filters`.
+
+Use this as the shortest agent-facing answer to "what is blocking automation right now?" after at least one readiness diagnostic or profile run has populated history.
+
 ## get_output_log
 
 Requests bounded output log data from the editor bridge. The Unreal plugin registers a thread-safe in-memory `GLog` output device during module startup and keeps the newest 2048 entries available for MCP queries.
@@ -220,7 +241,7 @@ The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches
 
 The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 
-The script also calls `get_observability_recent_events(limit=50)` at the end and requires recent `get_editor_readiness`, `diagnose_editor_automation_readiness`, and `run_profile_automation_tests` entries. The history read must not record itself and must not contain unexpected failed entries during a passing smoke.
+The script also calls `get_observability_recent_events(limit=50)` at the end and requires recent `get_editor_readiness`, `diagnose_editor_automation_readiness`, and `run_profile_automation_tests` entries. The history read must not record itself and must not contain unexpected failed entries during a passing smoke. Finally, `summarize_observability_state(limit=50)` must report `state: ready`, no latest blocker, no recommended next step, a successful latest entry, and zero unsuccessful entries.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from copy import deepcopy
 from threading import Lock
 from typing import Any, Callable, Deque, Dict, List, Optional
 
@@ -292,6 +293,67 @@ def _record_observability_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
         entry["sequence"] = _OBSERVABILITY_HISTORY_SEQUENCE
         _OBSERVABILITY_HISTORY.append(entry)
     return envelope
+
+
+def _observability_history_snapshot() -> List[Dict[str, Any]]:
+    with _OBSERVABILITY_HISTORY_LOCK:
+        return [deepcopy(entry) for entry in _OBSERVABILITY_HISTORY]
+
+
+def _filtered_history_entries(
+    *,
+    tool: Optional[str],
+    include_success: bool,
+    newest_first: bool,
+    entries: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    snapshot = entries if entries is not None else _observability_history_snapshot()
+    filtered_entries = [
+        entry
+        for entry in snapshot
+        if (tool is None or entry.get("tool") == tool)
+        and (include_success or not entry.get("successful"))
+    ]
+    if newest_first:
+        filtered_entries = list(reversed(filtered_entries))
+    return filtered_entries
+
+
+def _history_counts(entries: List[Dict[str, Any]]) -> Dict[str, int]:
+    successful = sum(1 for entry in entries if entry.get("successful"))
+    return {
+        "total_recorded": len(entries),
+        "successful": successful,
+        "unsuccessful": len(entries) - successful,
+    }
+
+
+def _recommended_summary_next_step(
+    *,
+    state: str,
+    latest_entry: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    if state == "unknown":
+        return {
+            "tool": "diagnose_editor_automation_readiness",
+            "reason": "Record a fresh read-only readiness diagnostic before running automation",
+        }
+    if state == "ready":
+        return None
+    if state == "failing":
+        return {
+            "tool": "run_profile_automation_tests",
+            "reason": "Inspect failing automation results and rerun the focused profile after fixes",
+        }
+    if latest_entry and latest_entry.get("tool") == "run_profile_automation_tests":
+        return {
+            "tool": "diagnose_editor_automation_readiness",
+            "reason": "Refresh the read-only diagnostic and resolve the reported blocker",
+        }
+    return {
+        "tool": "diagnose_editor_automation_readiness",
+        "reason": "Refresh the read-only diagnostic and resolve the reported blocker",
+    }
 
 
 def _compact_run_result(run_envelope: Dict[str, Any], requested_test_name: str) -> Dict[str, Any]:
@@ -868,17 +930,13 @@ def build_observability_recent_events(
     started_at = utc_now()
     bounded_limit = max(1, min(int(limit), MAX_OBSERVABILITY_HISTORY_EVENTS))
 
-    with _OBSERVABILITY_HISTORY_LOCK:
-        snapshot = [dict(entry) for entry in _OBSERVABILITY_HISTORY]
-
-    filtered_entries = [
-        entry
-        for entry in snapshot
-        if (tool is None or entry.get("tool") == tool)
-        and (include_success or not entry.get("successful"))
-    ]
-    if newest_first:
-        filtered_entries = list(reversed(filtered_entries))
+    snapshot = _observability_history_snapshot()
+    filtered_entries = _filtered_history_entries(
+        tool=tool,
+        include_success=include_success,
+        newest_first=newest_first,
+        entries=snapshot,
+    )
     entries = filtered_entries[:bounded_limit]
 
     data = {
@@ -896,6 +954,64 @@ def build_observability_recent_events(
 
     return build_success_envelope(
         tool="get_observability_recent_events",
+        started_at=started_at,
+        data=data,
+    )
+
+
+def build_observability_state_summary(
+    *,
+    tool: Optional[str] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    started_at = utc_now()
+    bounded_limit = max(1, min(int(limit), MAX_OBSERVABILITY_HISTORY_EVENTS))
+    all_entries = _filtered_history_entries(
+        tool=tool,
+        include_success=True,
+        newest_first=True,
+    )
+    scoped_entries = all_entries[:bounded_limit]
+    latest_entry = scoped_entries[0] if scoped_entries else None
+    latest_success = next(
+        (entry for entry in scoped_entries if entry.get("successful")),
+        None,
+    )
+
+    if latest_entry is None:
+        state = "unknown"
+        message = "No observability history recorded in this MCP server process"
+        latest_blocker = None
+    elif latest_entry.get("successful"):
+        state = "ready"
+        message = latest_entry.get("message") or "Latest observability result is healthy"
+        latest_blocker = None
+    else:
+        failure_category = latest_entry.get("failure_category")
+        state = "failing" if failure_category == "automation_failed" else "blocked"
+        message = latest_entry.get("message") or "Latest observability result is not successful"
+        latest_blocker = latest_entry
+
+    data = {
+        "state": state,
+        "message": message,
+        "latest_entry": latest_entry,
+        "latest_blocker": latest_blocker,
+        "latest_success": latest_success,
+        "recommended_next_step": _recommended_summary_next_step(
+            state=state,
+            latest_entry=latest_entry,
+        ),
+        "counts": _history_counts(all_entries),
+        "history_capacity": MAX_OBSERVABILITY_HISTORY_EVENTS,
+        "filters": {
+            "tool": tool,
+            "limit": bounded_limit,
+        },
+    }
+
+    return build_success_envelope(
+        tool="summarize_observability_state",
         started_at=started_at,
         data=data,
     )
@@ -1142,6 +1258,18 @@ def register_observability_tools(mcp: FastMCP):
             limit=limit,
             include_success=include_success,
             newest_first=newest_first,
+        )
+
+    @mcp.tool()
+    def summarize_observability_state(
+        ctx: Context,
+        tool: Optional[str] = None,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Return the latest actionable observability state from in-process history."""
+        return build_observability_state_summary(
+            tool=tool,
+            limit=limit,
         )
 
     @mcp.tool()

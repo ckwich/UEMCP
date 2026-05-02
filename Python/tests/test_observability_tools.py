@@ -6,6 +6,7 @@ from tools.observability_tools import (
     build_editor_readiness,
     build_failstate_context,
     build_observability_recent_events,
+    build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
     build_uemcp_ping,
@@ -696,6 +697,195 @@ def test_build_observability_recent_events_records_profile_preflight_failures():
     assert entry["evidence_refs"] == {
         "readiness_request_id": profile_run["error"]["raw"]["readiness_request_id"],
         "status_request_ids": [profile_run["error"]["raw"]["samples"][0]["request_id"]],
+    }
+
+
+def test_build_observability_state_summary_reports_unknown_without_history():
+    summary = build_observability_state_summary()
+
+    assert summary["ok"] is True
+    assert summary["tool"] == "summarize_observability_state"
+    assert summary["data"] == {
+        "state": "unknown",
+        "message": "No observability history recorded in this MCP server process",
+        "latest_entry": None,
+        "latest_blocker": None,
+        "latest_success": None,
+        "recommended_next_step": {
+            "tool": "diagnose_editor_automation_readiness",
+            "reason": "Record a fresh read-only readiness diagnostic before running automation",
+        },
+        "counts": {
+            "total_recorded": 0,
+            "successful": 0,
+            "unsuccessful": 0,
+        },
+        "history_capacity": 100,
+        "filters": {
+            "tool": None,
+            "limit": 20,
+        },
+    }
+
+
+def test_build_observability_state_summary_reports_latest_ready_state_without_bridge_calls():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "project_path": "C:/Dev/Failstate/Failstate.uproject",
+                "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                "is_pie_running": False,
+                "is_slow_task_active": False,
+            },
+        }
+    )
+
+    readiness = build_editor_readiness(lambda: connection)
+    call_count_before_summary = len(connection.calls)
+    summary = build_observability_state_summary(limit=5)
+
+    assert readiness["ok"] is True
+    assert len(connection.calls) == call_count_before_summary
+    assert summary["data"]["state"] == "ready"
+    assert summary["data"]["message"] == "Editor is ready for automation"
+    assert summary["data"]["latest_blocker"] is None
+    assert summary["data"]["latest_success"]["request_id"] == readiness["request_id"]
+    assert summary["data"]["latest_entry"]["request_id"] == readiness["request_id"]
+    assert summary["data"]["latest_entry"]["summary"] == {
+        "ready": True,
+        "state": "ready",
+        "blocking_reasons": [],
+    }
+    assert summary["data"]["recommended_next_step"] is None
+    assert summary["data"]["counts"] == {
+        "total_recorded": 1,
+        "successful": 1,
+        "unsuccessful": 0,
+    }
+    assert summary["data"]["filters"] == {
+        "tool": None,
+        "limit": 5,
+    }
+
+
+def test_build_observability_state_summary_reports_current_profile_preflight_blocker():
+    profile_run = build_profile_automation_run(
+        lambda: None,
+        profile_name="failstate",
+        limit=2,
+        output_log_limit=0,
+    )
+
+    summary = build_observability_state_summary()
+
+    assert profile_run["ok"] is False
+    data = summary["data"]
+    assert data["state"] == "blocked"
+    assert "connection_failed" in data["message"]
+    assert data["latest_success"] is None
+    assert data["latest_entry"]["request_id"] == profile_run["request_id"]
+    assert data["latest_blocker"]["request_id"] == profile_run["request_id"]
+    assert data["latest_blocker"]["failure_category"] == "connection_failed"
+    assert data["latest_blocker"]["observability_events"] == profile_run["error"]["raw"][
+        "observability_events"
+    ]
+    assert data["latest_blocker"]["evidence_refs"] == {
+        "readiness_request_id": profile_run["error"]["raw"]["readiness_request_id"],
+        "status_request_ids": [profile_run["error"]["raw"]["samples"][0]["request_id"]],
+    }
+    assert data["recommended_next_step"] == {
+        "tool": "diagnose_editor_automation_readiness",
+        "reason": "Refresh the read-only diagnostic and resolve the reported blocker",
+    }
+
+
+def test_build_observability_state_summary_reports_automation_failures_as_failing():
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "test": {
+                        "full_test_path": "UEMCP.Observability.Smoke",
+                        "test_name": "FUEMCPObservabilitySmokeTest",
+                    },
+                    "status": "failed",
+                    "successful": False,
+                    "duration_seconds": 0.01,
+                    "error_count": 1,
+                    "warning_count": 0,
+                    "events": [{"type": "error", "message": "Observed failure"}],
+                },
+            },
+        ]
+    )
+
+    profile_run = build_profile_automation_run(
+        lambda: connection,
+        test_name="UEMCP.Observability.Smoke",
+        output_log_limit=0,
+    )
+    summary = build_observability_state_summary(tool="run_profile_automation_tests")
+
+    assert profile_run["ok"] is True
+    data = summary["data"]
+    assert data["state"] == "failing"
+    assert data["latest_blocker"]["request_id"] == profile_run["request_id"]
+    assert data["latest_blocker"]["failure_category"] == "automation_failed"
+    assert data["latest_blocker"]["summary"] == {
+        "total": 1,
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "timed_out": 0,
+        "successful": False,
+    }
+    assert data["recommended_next_step"] == {
+        "tool": "run_profile_automation_tests",
+        "reason": "Inspect failing automation results and rerun the focused profile after fixes",
+    }
+
+
+def test_build_observability_state_summary_ignores_stale_failures_after_newer_success():
+    build_profile_automation_run(
+        lambda: None,
+        profile_name="failstate",
+        limit=2,
+        output_log_limit=0,
+    )
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                "is_pie_running": False,
+                "is_slow_task_active": False,
+            },
+        }
+    )
+    readiness = build_editor_readiness(lambda: connection)
+
+    summary = build_observability_state_summary()
+
+    assert readiness["data"]["ready"] is True
+    data = summary["data"]
+    assert data["state"] == "ready"
+    assert data["latest_entry"]["request_id"] == readiness["request_id"]
+    assert data["latest_blocker"] is None
+    assert data["latest_success"]["request_id"] == readiness["request_id"]
+    assert data["counts"] == {
+        "total_recorded": 3,
+        "successful": 1,
+        "unsuccessful": 2,
     }
 
 

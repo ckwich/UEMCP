@@ -143,6 +143,7 @@ from tools.observability_tools import (
     build_editor_status,
     build_failstate_context,
     build_observability_recent_events,
+    build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
     build_uemcp_ping,
@@ -245,6 +246,7 @@ if is_failstate_project:
     )
 
 checks.append(("get_observability_recent_events", build_observability_recent_events(limit=50)))
+checks.append(("summarize_observability_state", build_observability_state_summary(limit=50)))
 
 check_results = {name: result for name, result in checks}
 
@@ -326,6 +328,39 @@ if recent_events.get("history_capacity") != 100:
     failures.append(
         "get_observability_recent_events returned unexpected history capacity: "
         f"{recent_events}"
+    )
+
+state_summary = dict(check_results["summarize_observability_state"].get("data") or {})
+latest_state_entry = dict(state_summary.get("latest_entry") or {})
+if state_summary.get("state") != "ready":
+    failures.append(f"summarize_observability_state did not report ready: {state_summary}")
+if state_summary.get("latest_blocker") is not None:
+    failures.append(
+        "summarize_observability_state reported an unexpected blocker during passing smoke: "
+        f"{state_summary.get('latest_blocker')}"
+    )
+if state_summary.get("recommended_next_step") is not None:
+    failures.append(
+        "summarize_observability_state returned an unexpected next step during passing smoke: "
+        f"{state_summary.get('recommended_next_step')}"
+    )
+if latest_state_entry.get("successful") is not True:
+    failures.append(
+        "summarize_observability_state latest entry was not successful: "
+        f"{latest_state_entry}"
+    )
+if latest_state_entry.get("tool") not in recent_tools:
+    failures.append(
+        "summarize_observability_state latest entry was not present in recent history: "
+        f"{latest_state_entry}"
+    )
+summary_counts = dict(state_summary.get("counts") or {})
+if summary_counts.get("unsuccessful") != 0:
+    failures.append(f"summarize_observability_state reported failures: {state_summary}")
+if state_summary.get("history_capacity") != 100:
+    failures.append(
+        "summarize_observability_state returned unexpected history capacity: "
+        f"{state_summary}"
     )
 
 placeholder_warning = "Historical output log capture is not wired yet"
