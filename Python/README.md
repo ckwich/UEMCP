@@ -49,6 +49,21 @@ uv run --extra dev pytest -q
 uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
 ```
 
+For the live Unreal bridge gate, run from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
+```
+
+Against the Failstate worktree, attach the UEMCP repo plugin without installing it into the game project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+  -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
+  -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -CloseLaunchedEditor
+```
+
 ## Troubleshooting
 
 - Make sure Unreal Engine editor is loaded loaded and running before running the server.

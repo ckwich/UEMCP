@@ -1,6 +1,7 @@
 param(
     [string]$UeRoot = $env:UEMCP_UE_ROOT,
     [string]$ProjectPath,
+    [string]$PluginPath,
     [int]$Port = 55557,
     [int]$StartupTimeoutSeconds = 300,
     [switch]$SkipBuild,
@@ -28,6 +29,9 @@ if (-not $ProjectPath) {
     $ProjectPath = Join-Path $RepoRoot "MCPGameProject\MCPGameProject.uproject"
 }
 
+$DefaultProjectPath = Join-Path $RepoRoot "MCPGameProject\MCPGameProject.uproject"
+$DefaultPluginPath = Join-Path $RepoRoot "MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin"
+
 $EditorPath = Join-Path $UeRoot "Engine\Binaries\Win64\UnrealEditor.exe"
 $BuildPath = Join-Path $UeRoot "Engine\Build\BatchFiles\Build.bat"
 $PythonDir = Join-Path $RepoRoot "Python"
@@ -39,6 +43,23 @@ foreach ($PathToCheck in @($EditorPath, $BuildPath, $ProjectPath, $PythonDir)) {
 }
 
 $ResolvedProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
+$ResolvedDefaultProjectPath = (Resolve-Path -LiteralPath $DefaultProjectPath).Path
+$ResolvedPluginPath = $null
+
+if ($PluginPath) {
+    if (-not (Test-Path -LiteralPath $PluginPath -PathType Leaf)) {
+        throw "Plugin path not found: $PluginPath"
+    }
+
+    $ResolvedPluginPath = (Resolve-Path -LiteralPath $PluginPath).Path
+}
+
+if (-not $ResolvedPluginPath) {
+    $ProjectPluginPath = Join-Path (Split-Path -Parent $ResolvedProjectPath) "Plugins\UnrealMCP\UnrealMCP.uplugin"
+    if (-not (Test-Path -LiteralPath $ProjectPluginPath -PathType Leaf) -and $ResolvedProjectPath -ne $ResolvedDefaultProjectPath) {
+        throw "UEMCP plugin is not attached to this project. Pass -PluginPath '$DefaultPluginPath' to launch the repo plugin through Unreal's -PLUGIN switch, or install UnrealMCP under the project's Plugins folder."
+    }
+}
 
 function Get-UemcpBridgeListener {
     Get-NetTCPConnection `
@@ -50,7 +71,7 @@ function Get-UemcpBridgeListener {
 }
 
 if (-not $SkipBuild) {
-    Write-Output "Building MCPGameProject editor target with $BuildPath"
+    Write-Output "Building editor target for $ResolvedProjectPath with $BuildPath"
     & $BuildPath `
         Development `
         Win64 `
@@ -61,7 +82,7 @@ if (-not $SkipBuild) {
         -NoHotReloadFromIDE
 
     if ($LASTEXITCODE -ne 0) {
-        throw "MCPGameProject editor target build failed with exit code $LASTEXITCODE."
+        throw "Editor target build failed with exit code $LASTEXITCODE."
     }
 }
 
@@ -73,9 +94,15 @@ try {
         }
 
         Write-Output "Launching Unreal Editor for $ResolvedProjectPath"
+        $EditorArgs = @($ResolvedProjectPath, "-log")
+        if ($ResolvedPluginPath) {
+            Write-Output "Attaching UEMCP plugin with -PLUGIN=$ResolvedPluginPath"
+            $EditorArgs += "-PLUGIN=$ResolvedPluginPath"
+        }
+
         $LaunchedEditor = Start-Process `
             -FilePath $EditorPath `
-            -ArgumentList @($ResolvedProjectPath, "-log") `
+            -ArgumentList $EditorArgs `
             -PassThru
     }
 

@@ -61,3 +61,14 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 ```
 
 The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true` or if `get_editor_status.project_path` does not match the sample project.
+
+To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+  -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
+  -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -CloseLaunchedEditor
+```
+
+If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.
