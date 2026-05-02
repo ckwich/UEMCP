@@ -410,7 +410,55 @@ def test_build_profile_automation_run_blocks_when_editor_is_not_ready():
     assert "not ready" in envelope["error"]["message"].lower()
     assert envelope["error"]["raw"]["blocking_reasons"] == ["editor_slow_task_active"]
     assert envelope["error"]["raw"]["readiness_request_id"].startswith("get_editor_readiness-")
+    assert envelope["error"]["raw"]["failure_category"] == "editor_busy"
+    assert envelope["error"]["raw"]["observability_events"] == [
+        {
+            "type": "readiness_gate_failed",
+            "phase": "profile_automation_preflight",
+            "severity": "error",
+            "failure_category": "editor_busy",
+            "state": "blocked",
+            "blocking_reasons": ["editor_slow_task_active"],
+            "message": "Editor is not ready for automation: editor_slow_task_active",
+            "readiness_request_id": envelope["error"]["raw"]["readiness_request_id"],
+            "latest_status_request_id": envelope["error"]["raw"]["samples"][0]["request_id"],
+            "status_error_category": None,
+            "evidence_refs": {
+                "readiness_request_id": envelope["error"]["raw"]["readiness_request_id"],
+                "status_request_ids": [envelope["error"]["raw"]["samples"][0]["request_id"]],
+            },
+        }
+    ]
     assert connection.calls == [("get_editor_status", {})]
+
+
+def test_build_profile_automation_run_preserves_connection_failure_readiness_event():
+    envelope = build_profile_automation_run(
+        lambda: None,
+        profile_name="failstate",
+        limit=2,
+        output_log_limit=0,
+    )
+
+    assert envelope["ok"] is False
+    assert envelope["tool"] == "run_profile_automation_tests"
+    assert envelope["error"]["category"] == "connection_failed"
+    assert "connection_failed" in envelope["error"]["message"]
+    assert envelope["error"]["raw"]["blocking_reasons"] == ["editor_status_unavailable"]
+    assert envelope["error"]["raw"]["failure_category"] == "connection_failed"
+
+    event = envelope["error"]["raw"]["observability_events"][0]
+    assert event["type"] == "readiness_gate_failed"
+    assert event["phase"] == "profile_automation_preflight"
+    assert event["failure_category"] == "connection_failed"
+    assert event["blocking_reasons"] == ["editor_status_unavailable"]
+    assert event["status_error_category"] == "connection_failed"
+    assert event["readiness_request_id"].startswith("get_editor_readiness-")
+    assert event["latest_status_request_id"].startswith("get_editor_status-")
+    assert event["evidence_refs"] == {
+        "readiness_request_id": event["readiness_request_id"],
+        "status_request_ids": [event["latest_status_request_id"]],
+    }
 
 
 def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary_and_log_tail():
@@ -502,6 +550,7 @@ def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary
     assert envelope["ok"] is True
     assert envelope["tool"] == "run_profile_automation_tests"
     assert envelope["data"]["readiness"]["ready"] is True
+    assert envelope["data"]["observability_events"] == []
     assert envelope["data"]["evidence_refs"]["readiness_request_id"].startswith(
         "get_editor_readiness-"
     )
@@ -595,6 +644,7 @@ def test_build_profile_automation_run_executes_one_exact_test_without_discovery(
     assert envelope["ok"] is True
     assert envelope["data"]["mode"] == "single"
     assert envelope["data"]["readiness"]["ready"] is True
+    assert envelope["data"]["observability_events"] == []
     assert envelope["data"]["requested_test_name"] == "UEMCP.Observability.Smoke"
     assert envelope["data"]["discovery"] is None
     assert envelope["data"]["summary"]["successful"] is True

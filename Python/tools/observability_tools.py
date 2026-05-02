@@ -127,6 +127,69 @@ def _compact_readiness_result(readiness_envelope: Dict[str, Any]) -> Dict[str, A
     }
 
 
+def _latest_readiness_status_error_category(readiness: Dict[str, Any]) -> Optional[str]:
+    samples = list(readiness.get("samples") or [])
+    latest_sample = dict(samples[-1]) if samples else {}
+    error = latest_sample.get("error")
+    if isinstance(error, dict):
+        category = error.get("category")
+        return str(category) if category else None
+    return None
+
+
+def _readiness_failure_category(readiness: Dict[str, Any]) -> str:
+    status_error_category = _latest_readiness_status_error_category(readiness)
+    if status_error_category:
+        return status_error_category
+
+    if readiness.get("state") == "timeout":
+        return "timeout"
+
+    blocking_reasons = set(readiness.get("blocking_reasons") or [])
+    if blocking_reasons.intersection({"editor_slow_task_active", "play_in_editor_running"}):
+        return "editor_busy"
+    return "internal_error"
+
+
+def _readiness_status_request_ids(readiness: Dict[str, Any]) -> List[str]:
+    request_ids: List[str] = []
+    for sample in readiness.get("samples") or []:
+        request_id = sample.get("request_id")
+        if request_id:
+            request_ids.append(str(request_id))
+    return request_ids
+
+
+def _readiness_failure_event(readiness: Dict[str, Any]) -> Dict[str, Any]:
+    blocking_reasons = list(readiness.get("blocking_reasons") or ["editor_status_unavailable"])
+    status_request_ids = _readiness_status_request_ids(readiness)
+    failure_category = _readiness_failure_category(readiness)
+    if failure_category == "editor_busy":
+        message = "Editor is not ready for automation: " + ", ".join(blocking_reasons)
+    else:
+        message = (
+            f"Editor readiness gate failed: {failure_category}: "
+            + ", ".join(blocking_reasons)
+        )
+
+    return {
+        "type": "readiness_gate_failed",
+        "phase": "profile_automation_preflight",
+        "severity": "error",
+        "failure_category": failure_category,
+        "state": readiness.get("state"),
+        "blocking_reasons": blocking_reasons,
+        "message": message,
+        "readiness_request_id": readiness.get("readiness_request_id"),
+        "latest_status_request_id": status_request_ids[-1] if status_request_ids else None,
+        "status_error_category": _latest_readiness_status_error_category(readiness),
+        "evidence_refs": {
+            "readiness_request_id": readiness.get("readiness_request_id"),
+            "status_request_ids": status_request_ids,
+        },
+    }
+
+
 def _readiness_reasons(status_data: Dict[str, Any]) -> List[str]:
     reasons: List[str] = []
     if status_data.get("is_slow_task_active"):
@@ -380,16 +443,16 @@ def build_profile_automation_run(
         )
         readiness = _compact_readiness_result(readiness_envelope)
         if not readiness["ready"]:
-            blocking_reasons = readiness["blocking_reasons"] or ["editor_status_unavailable"]
+            readiness_event = _readiness_failure_event(readiness)
+            raw_readiness = dict(readiness)
+            raw_readiness["failure_category"] = readiness_event["failure_category"]
+            raw_readiness["observability_events"] = [readiness_event]
             return build_error_envelope(
                 tool="run_profile_automation_tests",
                 started_at=started_at,
-                message=(
-                    "Editor is not ready for automation: "
-                    + ", ".join(str(reason) for reason in blocking_reasons)
-                ),
-                category="editor_busy",
-                raw=readiness,
+                message=readiness_event["message"],
+                category=readiness_event["failure_category"],
+                raw=raw_readiness,
                 warnings=warnings + list(readiness_envelope.get("warnings") or []),
                 editor=_editor_identity(readiness["latest_status"]),
             )
@@ -474,6 +537,7 @@ def build_profile_automation_run(
         "limit": bounded_limit if mode == "prefix" else None,
         "timeout_seconds": bounded_timeout_seconds,
         "readiness": readiness,
+        "observability_events": [],
         "summary": _automation_summary(results),
         "tests": results,
         "discovery": discovery,

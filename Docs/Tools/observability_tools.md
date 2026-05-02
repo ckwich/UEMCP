@@ -138,13 +138,19 @@ The response includes:
 
 - `mode`: `single` or `prefix`.
 - `readiness`: compact readiness gate evidence, including readiness request id, ready state, blocking reasons, latest status, and bounded samples.
+- `observability_events`: normalized high-level events emitted by the runner. Successful runs currently return an empty list.
 - `summary`: total, passed, failed, errors, timed_out, and successful counts.
 - `tests`: compact per-test results with runnable names, status, duration, counts, bounded event snippets, and request ids.
 - `discovery`: batch-mode discovery evidence, including matched/returned counts and prefix filters.
 - `output_log_tail`: bounded Unreal output-log entries captured after the run.
 - `evidence_refs`: request ids linking the readiness, discovery, run, and output-log envelopes.
 
-If `require_ready` is true and the readiness gate reports `editor_slow_task_active`, `play_in_editor_running`, or `editor_status_unavailable`, the tool returns `ok: false` with `error.category: editor_busy` before discovery or automation execution. This keeps the failed gate attached to the high-level command instead of relying on every caller to run a manual preflight.
+If `require_ready` is true and the readiness gate reports `editor_slow_task_active`, `play_in_editor_running`, or `editor_status_unavailable`, the tool returns `ok: false` before discovery or automation execution. The error raw payload keeps the compact readiness evidence and adds:
+
+- `failure_category`: normalized category for routing, such as `editor_busy`, `connection_failed`, `unsupported_command`, `timeout`, or `internal_error`.
+- `observability_events`: one `readiness_gate_failed` event with `phase`, `severity`, `failure_category`, `state`, `blocking_reasons`, readable `message`, readiness request id, latest status request id, status error category, and evidence refs.
+
+This keeps the failed gate attached to the high-level command instead of relying on every caller to run a manual preflight or infer the root cause from nested readiness samples.
 
 This tool is intentionally a Python composition of `get_editor_readiness`, `list_automation_tests`, `run_automation_test`, and `get_output_log`; it does not add a new Unreal mutation path.
 
@@ -168,7 +174,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 
 The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
-The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, and output-log tail evidence.
+The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 
@@ -179,6 +185,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing or the prefix-batch summary is not successful.
+When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

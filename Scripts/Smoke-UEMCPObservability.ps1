@@ -304,6 +304,11 @@ if profile_smoke_readiness.get("ready") is not True:
     )
 if not (profile_smoke_run.get("evidence_refs") or {}).get("readiness_request_id"):
     failures.append("run_profile_automation_tests did not return UEMCP readiness evidence")
+if profile_smoke_run.get("observability_events") != []:
+    failures.append(
+        "run_profile_automation_tests returned unexpected UEMCP observability events: "
+        f"{profile_smoke_run.get('observability_events')}"
+    )
 if profile_smoke_summary.get("total") != 1 or profile_smoke_summary.get("successful") is not True:
     failures.append(
         "run_profile_automation_tests did not pass UEMCP.Observability.Smoke: "
@@ -338,6 +343,11 @@ if is_failstate_project:
         )
     if not (failstate_profile_run.get("evidence_refs") or {}).get("readiness_request_id"):
         failures.append("run_profile_automation_tests did not return Failstate readiness evidence")
+    if failstate_profile_run.get("observability_events") != []:
+        failures.append(
+            "run_profile_automation_tests returned unexpected Failstate observability events: "
+            f"{failstate_profile_run.get('observability_events')}"
+        )
     if failstate_profile_run.get("prefix") != "Failstate.Phase1":
         failures.append(
             "run_profile_automation_tests used unexpected Failstate prefix: "
