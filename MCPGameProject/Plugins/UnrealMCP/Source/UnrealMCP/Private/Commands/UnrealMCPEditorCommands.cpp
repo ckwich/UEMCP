@@ -217,6 +217,7 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetEditorStatus(const TS
     ResultObj->SetStringField(TEXT("current_map"), CurrentMap);
 
     ResultObj->SetBoolField(TEXT("is_pie_running"), GEditor && GEditor->PlayWorld != nullptr);
+    ResultObj->SetBoolField(TEXT("is_slow_task_active"), GIsSlowTask);
     ResultObj->SetNumberField(TEXT("selected_actor_count"), GEditor ? GEditor->GetSelectedActorCount() : 0);
 
     int32 DirtyPackageCount = 0;

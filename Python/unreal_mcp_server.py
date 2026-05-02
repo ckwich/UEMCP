@@ -22,14 +22,23 @@ logger = logging.getLogger("UnrealMCP")
 # Configuration
 UNREAL_HOST = "127.0.0.1"
 UNREAL_PORT = 55557
+CONNECT_TIMEOUT_SECONDS = 5.0
+RECEIVE_TIMEOUT_SECONDS = 30.0
+AUTOMATION_COMMAND_GRACE_SECONDS = 15.0
 
 class UnrealConnection:
     """Connection to an Unreal Engine instance."""
     
-    def __init__(self):
+    def __init__(
+        self,
+        connect_timeout_seconds: float = CONNECT_TIMEOUT_SECONDS,
+        receive_timeout_seconds: float = RECEIVE_TIMEOUT_SECONDS,
+    ):
         """Initialize the connection."""
         self.socket = None
         self.connected = False
+        self.connect_timeout_seconds = float(connect_timeout_seconds)
+        self.receive_timeout_seconds = float(receive_timeout_seconds)
     
     def connect(self) -> bool:
         """Connect to the Unreal Engine instance."""
@@ -44,7 +53,7 @@ class UnrealConnection:
             
             logger.info(f"Connecting to Unreal at {UNREAL_HOST}:{UNREAL_PORT}...")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5)  # 5 second timeout
+            self.socket.settimeout(self.connect_timeout_seconds)
             
             # Set socket options for better stability
             self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -74,10 +83,31 @@ class UnrealConnection:
         self.socket = None
         self.connected = False
 
-    def receive_full_response(self, sock, buffer_size=4096) -> bytes:
+    def receive_timeout_for_command(self, command: str, params: Dict[str, Any] = None) -> float:
+        """Return the socket receive budget for a command response."""
+        if command == "run_automation_test":
+            requested_timeout = RECEIVE_TIMEOUT_SECONDS
+            try:
+                requested_timeout = float((params or {}).get("timeout_seconds", requested_timeout))
+            except (TypeError, ValueError):
+                logger.warning("Invalid automation timeout parameter: %s", params)
+
+            return max(
+                self.receive_timeout_seconds,
+                requested_timeout + AUTOMATION_COMMAND_GRACE_SECONDS,
+            )
+
+        return self.receive_timeout_seconds
+
+    def receive_full_response(
+        self,
+        sock,
+        buffer_size=4096,
+        timeout_seconds: Optional[float] = None,
+    ) -> bytes:
         """Receive a complete response from Unreal, handling chunked data."""
         chunks = []
-        sock.settimeout(5)  # 5 second timeout
+        sock.settimeout(timeout_seconds or self.receive_timeout_seconds)
         try:
             while True:
                 chunk = sock.recv(buffer_size)
@@ -148,7 +178,10 @@ class UnrealConnection:
             self.socket.sendall(command_json.encode('utf-8'))
             
             # Read response using improved handler
-            response_data = self.receive_full_response(self.socket)
+            response_data = self.receive_full_response(
+                self.socket,
+                timeout_seconds=self.receive_timeout_for_command(command, params),
+            )
             response = json.loads(response_data.decode('utf-8'))
             
             # Log complete response for debugging

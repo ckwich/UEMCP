@@ -133,6 +133,7 @@ try {
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from tools.observability_tools import (
@@ -141,6 +142,7 @@ from tools.observability_tools import (
     build_editor_status,
     build_failstate_context,
     build_output_log,
+    build_profile_automation_run,
     build_uemcp_ping,
 )
 
@@ -152,30 +154,112 @@ def normalize_path(value: str) -> str:
 expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
 is_failstate_project = "/failstate/" in expected_project or expected_project.endswith("/failstate.uproject")
 
-checks = [
-    ("uemcp_ping", build_uemcp_ping()),
-    ("get_editor_status", build_editor_status()),
-    ("get_output_log", build_output_log(limit=5)),
+def wait_for_editor_idle(label: str, timeout_seconds: float = 60.0):
+    deadline = time.monotonic() + timeout_seconds
+    idle_samples = 0
+    samples = []
+
+    while time.monotonic() < deadline:
+        result = build_editor_status()
+        data = dict(result.get("data") or {})
+        samples.append(
+            {
+                "ok": result.get("ok"),
+                "is_slow_task_active": data.get("is_slow_task_active"),
+                "is_pie_running": data.get("is_pie_running"),
+                "current_map": data.get("current_map"),
+            }
+        )
+        samples = samples[-5:]
+
+        if result.get("ok") and not data.get("is_slow_task_active") and not data.get("is_pie_running"):
+            idle_samples += 1
+            if idle_samples >= 2:
+                return {
+                    "ok": True,
+                    "tool": "wait_for_editor_idle",
+                    "data": {"label": label, "samples": samples},
+                    "warnings": [],
+                    "error": None,
+                }
+        else:
+            idle_samples = 0
+
+        time.sleep(1.0)
+
+    return {
+        "ok": False,
+        "tool": "wait_for_editor_idle",
+        "data": {"label": label, "samples": samples},
+        "warnings": [],
+        "error": {
+            "category": "editor_busy",
+            "message": f"Timed out waiting for editor idle before {label}",
+            "raw": samples,
+        },
+    }
+
+
+checks = []
+
+checks.append(("uemcp_ping", build_uemcp_ping()))
+checks.append(("get_editor_status", build_editor_status()))
+checks.append(("get_output_log", build_output_log(limit=5)))
+checks.append(
     (
         "get_output_log_filtered",
         build_output_log(limit=10, category="LogTemp", contains="get_output_log"),
-    ),
-    ("get_failstate_context", build_failstate_context()),
-    ("list_uemcp_automation_tests", build_automation_tests(prefix="UEMCP.", limit=20)),
+    )
+)
+checks.append(("get_failstate_context", build_failstate_context()))
+checks.append(("wait_editor_idle_before_discovery", wait_for_editor_idle("automation discovery")))
+checks.append(("list_uemcp_automation_tests", build_automation_tests(prefix="UEMCP.", limit=20)))
+checks.append(("wait_editor_idle_before_uemcp_run", wait_for_editor_idle("UEMCP smoke run")))
+checks.append(
     (
         "run_uemcp_automation_smoke",
         build_automation_test_run(
             test_name="UEMCP.Observability.Smoke",
             timeout_seconds=30,
         ),
-    ),
-]
+    )
+)
+checks.append(("wait_editor_idle_before_profile_uemcp_run", wait_for_editor_idle("profile UEMCP smoke run")))
+checks.append(
+    (
+        "run_profile_automation_uemcp_smoke",
+        build_profile_automation_run(
+            test_name="UEMCP.Observability.Smoke",
+            timeout_seconds=30,
+            output_log_limit=5,
+        ),
+    )
+)
 
 if is_failstate_project:
+    checks.append(("wait_editor_idle_before_failstate_discovery", wait_for_editor_idle("Failstate discovery")))
     checks.append(
         (
             "list_failstate_automation_tests",
             build_automation_tests(prefix="Failstate.Phase1", limit=20),
+        )
+    )
+    checks.append(
+        (
+            "wait_editor_idle_before_failstate_profile_run",
+            wait_for_editor_idle("Failstate profile automation run"),
+        )
+    )
+    checks.append(
+        (
+            "run_profile_automation_failstate_prefix",
+            build_profile_automation_run(
+                profile_name="failstate",
+                prefix="Failstate.Phase1",
+                limit=10,
+                timeout_seconds=30,
+                output_log_limit=10,
+            ),
         )
     )
 
@@ -235,6 +319,18 @@ smoke_run = dict(check_results["run_uemcp_automation_smoke"].get("data") or {})
 if smoke_run.get("status") != "passed" or smoke_run.get("successful") is not True:
     failures.append(f"run_automation_test did not pass UEMCP.Observability.Smoke: {smoke_run}")
 
+profile_smoke_run = dict(check_results["run_profile_automation_uemcp_smoke"].get("data") or {})
+profile_smoke_summary = dict(profile_smoke_run.get("summary") or {})
+if profile_smoke_run.get("mode") != "single":
+    failures.append(f"run_profile_automation_tests did not use single mode: {profile_smoke_run}")
+if profile_smoke_summary.get("total") != 1 or profile_smoke_summary.get("successful") is not True:
+    failures.append(
+        "run_profile_automation_tests did not pass UEMCP.Observability.Smoke: "
+        f"{profile_smoke_run}"
+    )
+if not (profile_smoke_run.get("output_log_tail") or {}).get("entries"):
+    failures.append("run_profile_automation_tests did not return output_log_tail entries")
+
 if is_failstate_project:
     failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
     returned_failstate_tests = failstate_tests.get("tests") or []
@@ -244,6 +340,27 @@ if is_failstate_project:
         full_test_path = str(test.get("full_test_path") or test.get("test_name") or "")
         if not full_test_path.startswith("Failstate.Phase1"):
             failures.append(f"Failstate automation query returned outside-prefix test {full_test_path!r}")
+
+    failstate_profile_run = dict(
+        check_results["run_profile_automation_failstate_prefix"].get("data") or {}
+    )
+    failstate_profile_summary = dict(failstate_profile_run.get("summary") or {})
+    if failstate_profile_run.get("mode") != "prefix":
+        failures.append(
+            f"run_profile_automation_tests did not use Failstate prefix mode: {failstate_profile_run}"
+        )
+    if failstate_profile_run.get("prefix") != "Failstate.Phase1":
+        failures.append(
+            "run_profile_automation_tests used unexpected Failstate prefix: "
+            f"{failstate_profile_run.get('prefix')!r}"
+        )
+    if failstate_profile_summary.get("total", 0) < 1:
+        failures.append("run_profile_automation_tests returned no Failstate.Phase1 results")
+    if failstate_profile_summary.get("successful") is not True:
+        failures.append(
+            "run_profile_automation_tests did not pass the Failstate.Phase1 prefix batch: "
+            f"{failstate_profile_run}"
+        )
 
 summary = {
     "ok": not failures,

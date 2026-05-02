@@ -26,6 +26,7 @@ Returns Unreal Editor identity and state:
 - Project name and path.
 - Current map.
 - PIE running state.
+- Editor slow-task state.
 - Selected actor count.
 - Dirty package count.
 
@@ -92,9 +93,33 @@ The response includes:
 - `duration_seconds` and `reported_duration_seconds`.
 - `error_count`, `warning_count`, `event_count`, `events_truncated`, and bounded `events`.
 
-The bridge refuses to start automation tests while an editor slow task or Play In Editor session is active. This avoids Unreal's `StopTest()` assertion path and makes the failed gate explicit.
+The bridge refuses to start automation tests while an editor slow task or Play In Editor session is active. This avoids Unreal's `StopTest()` assertion path and makes the failed gate explicit. `get_editor_status` exposes those readiness gates as `is_slow_task_active` and `is_pie_running`.
 
 The plugin ships a deterministic smoke test named `UEMCP.Observability.Smoke`; the live smoke script lists and runs it before reporting success.
+
+## run_profile_automation_tests
+
+Runs either one exact automation test or a bounded batch discovered from a profile automation prefix, then returns a compact summary with output-log tail evidence.
+
+Parameters:
+
+- `profile_name`: profile used for default automation prefixes; defaults to `failstate`.
+- `test_name`: optional exact `full_test_path` or `test_name`. When present, the tool runs single-test mode and skips discovery.
+- `prefix`: optional automation prefix for batch mode. When omitted, the first profile `automation_test_prefixes` entry is used.
+- `limit`: maximum discovered tests to run in batch mode, clamped from 1 to 50.
+- `timeout_seconds`: per-test timeout, clamped from 1 to 120 seconds.
+- `output_log_limit`: number of output log entries to include after the run, clamped from 0 to 1000.
+
+The response includes:
+
+- `mode`: `single` or `prefix`.
+- `summary`: total, passed, failed, errors, timed_out, and successful counts.
+- `tests`: compact per-test results with runnable names, status, duration, counts, bounded event snippets, and request ids.
+- `discovery`: batch-mode discovery evidence, including matched/returned counts and prefix filters.
+- `output_log_tail`: bounded Unreal output-log entries captured after the run.
+- `evidence_refs`: request ids linking the discovery, run, and output-log envelopes.
+
+This tool is intentionally a Python composition of `list_automation_tests`, `run_automation_test`, and `get_output_log`; it does not add a new Unreal mutation path.
 
 ## get_failstate_context
 
@@ -116,7 +141,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 
 The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
-The script also requires `list_automation_tests(prefix="UEMCP.")` to return `UEMCP.Observability.Smoke` and `run_automation_test("UEMCP.Observability.Smoke")` to pass with zero errors.
+The script also waits for two consecutive idle editor status samples before automation gates, then requires `list_automation_tests(prefix="UEMCP.")` to return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` to pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke")` to return a successful single-test summary plus output-log tail evidence.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 
@@ -127,6 +152,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix.
+When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10)` and fails if the prefix-batch summary is not successful.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

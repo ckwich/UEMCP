@@ -59,6 +59,7 @@ def test_error_envelope_classifies_connection_failures():
         ("Timeout receiving Unreal response", "timeout"),
         ("Unknown command: get_editor_status", "unsupported_command"),
         ("Missing 'path' parameter", "invalid_params"),
+        ("Automation tests cannot run while an editor slow task is active", "editor_busy"),
         ("Blueprint asset not found", "asset_not_found"),
         ("Automation test failed", "automation_failed"),
         ("Something else", "internal_error"),

@@ -37,6 +37,8 @@ def classify_error(message: str) -> str:
         return "unsupported_command"
     if "missing" in lower_message or "invalid" in lower_message:
         return "invalid_params"
+    if "slow task" in lower_message or "play in editor" in lower_message:
+        return "editor_busy"
     if "not found" in lower_message and "asset" in lower_message:
         return "asset_not_found"
     if "automation" in lower_message and "fail" in lower_message:
