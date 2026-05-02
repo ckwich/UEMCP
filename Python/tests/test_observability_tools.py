@@ -1,4 +1,5 @@
 from tools.observability_tools import (
+    build_asset_search,
     build_automation_test_run,
     build_automation_tests,
     build_editor_automation_readiness_diagnostic,
@@ -11,6 +12,7 @@ from tools.observability_tools import (
     build_profile_automation_run,
     build_uemcp_ping,
     clear_observability_history,
+    register_observability_tools,
 )
 
 
@@ -47,6 +49,18 @@ class FakeClock:
     def sleep(self, seconds):
         self.sleeps.append(seconds)
         self.now += seconds
+
+
+class ToolRecorder:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def decorator(func):
+            self.tools[func.__name__] = func
+            return func
+
+        return decorator
 
 
 def setup_function():
@@ -353,6 +367,96 @@ def test_build_automation_tests_clamps_limit():
 
     assert envelope["ok"] is True
     assert connection.calls == [("list_automation_tests", {"limit": 1000})]
+
+
+def test_build_asset_search_passes_bounded_filters_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "assets": [
+                    {
+                        "asset_name": "BP_FSBlockoutCover",
+                        "object_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover.BP_FSBlockoutCover",
+                        "package_name": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                        "package_path": "/Game/Failstate/Blueprints/Blockout",
+                        "asset_class": "Blueprint",
+                    }
+                ],
+                "matched_asset_count": 1,
+                "returned_asset_count": 1,
+                "truncated": False,
+                "filters": {
+                    "root": "Content/Failstate/Blueprints/Blockout",
+                    "package_path": "/Game/Failstate/Blueprints/Blockout",
+                    "class_name": "Blueprint",
+                    "name_contains": "BP_FSBlockout",
+                    "path_contains": "Blockout",
+                    "limit": 25,
+                },
+            },
+        }
+    )
+
+    envelope = build_asset_search(
+        lambda: connection,
+        root="Content/Failstate/Blueprints/Blockout",
+        class_name="Blueprint",
+        name_contains="BP_FSBlockout",
+        path_contains="Blockout",
+        limit=25,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "asset_search"
+    assert envelope["data"]["assets"][0]["asset_name"] == "BP_FSBlockoutCover"
+    assert envelope["data"]["matched_asset_count"] == 1
+    assert connection.calls == [
+        (
+            "asset_search",
+            {
+                "root": "Content/Failstate/Blueprints/Blockout",
+                "class_name": "Blueprint",
+                "name_contains": "BP_FSBlockout",
+                "path_contains": "Blockout",
+                "limit": 25,
+            },
+        )
+    ]
+
+
+def test_build_asset_search_clamps_limit_and_skips_empty_filters():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "assets": [],
+                "matched_asset_count": 0,
+                "returned_asset_count": 0,
+                "truncated": False,
+            },
+        }
+    )
+
+    envelope = build_asset_search(
+        lambda: connection,
+        root="",
+        class_name="",
+        name_contains=None,
+        path_contains="",
+        limit=5000,
+    )
+
+    assert envelope["ok"] is True
+    assert connection.calls == [("asset_search", {"limit": 1000})]
+
+
+def test_register_observability_tools_exposes_asset_search():
+    recorder = ToolRecorder()
+
+    register_observability_tools(recorder)
+
+    assert "asset_search" in recorder.tools
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():

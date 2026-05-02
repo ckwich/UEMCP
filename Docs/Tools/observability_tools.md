@@ -139,6 +139,41 @@ The response includes:
 
 Each entry includes `sequence`, `time_seconds`, `timestamp_utc`, `category`, `verbosity`, and `message`.
 
+## asset_search
+
+Searches Unreal Asset Registry metadata on the game thread without loading, saving, or mutating assets. Use this as the first Phase 2 content-observation gate before dependency, referencer, Blueprint, or level-inspection tools.
+
+Parameters:
+
+- `root`: optional content root. Defaults to `/Game`. Accepts Unreal package roots such as `/Game/Failstate`, repo-style content paths such as `Content/Failstate/Blueprints/Blockout`, and absolute paths containing `/Content/`.
+- `class_name`: optional asset class filter. Matching accepts either the short class name such as `Blueprint` or the full class path such as `/Script/Engine.Blueprint`.
+- `name_contains`: optional asset-name substring filter.
+- `path_contains`: optional object-path or package-name substring filter.
+- `limit`: maximum assets, clamped from 1 to 1000.
+
+The response includes:
+
+- `assets`: matching assets, sorted by object path and bounded by `limit`.
+- `total_asset_count`: assets returned by the Asset Registry root filter before text/class filtering.
+- `matched_asset_count`: assets matching all filters before `limit`.
+- `returned_asset_count`: assets returned.
+- `truncated`: true when more matching assets exist than were returned.
+- `asset_registry_loading`: true when the Asset Registry reports it is still loading and results may be incomplete.
+- `filters`: normalized query, including the Unreal package path actually used by the bridge.
+- `warnings`: bounded non-fatal warnings.
+
+Each asset includes `asset_name`, `object_path`, `package_name`, `package_path`, `asset_class`, and `asset_class_path`.
+
+For Failstate Blockout validation:
+
+```python
+build_asset_search(
+    root="Content/Failstate/Blueprints/Blockout",
+    name_contains="BP_FSBlockout",
+    limit=50,
+)
+```
+
 ## list_automation_tests
 
 Lists Unreal automation tests currently visible to the editor automation framework. The bridge calls `FAutomationTestFramework::LoadTestModules()` and `GetValidTestNames()` on the game thread, then returns a bounded, prefix-filtered result.
@@ -239,7 +274,7 @@ Use the repo smoke script to prove the editor-target build, bridge listener, and
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 ```
 
-The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
+The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, if category/substring filtering returns entries outside the requested filter, or if `asset_search(root="/Game", limit=20)` returns assets outside `/Game` or outside the requested limit.
 
 The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 
@@ -254,6 +289,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
+When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

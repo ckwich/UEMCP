@@ -738,6 +738,34 @@ def build_automation_tests(
     )
 
 
+def build_asset_search(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    root: Optional[str] = None,
+    class_name: Optional[str] = None,
+    name_contains: Optional[str] = None,
+    path_contains: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    params: Dict[str, Any] = {"limit": bounded_limit}
+    if root:
+        params["root"] = root
+    if class_name:
+        params["class_name"] = class_name
+    if name_contains:
+        params["name_contains"] = name_contains
+    if path_contains:
+        params["path_contains"] = path_contains
+
+    return execute_bridge_command(
+        tool="asset_search",
+        command="asset_search",
+        connection_factory=connection_factory,
+        params=params,
+    )
+
+
 def build_automation_test_run(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -1286,6 +1314,24 @@ def register_observability_tools(mcp: FastMCP):
             category=category,
             verbosity=verbosity,
             contains=contains,
+        )
+
+    @mcp.tool()
+    def asset_search(
+        ctx: Context,
+        root: Optional[str] = None,
+        class_name: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        path_contains: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Search Unreal Asset Registry metadata without loading or mutating assets."""
+        return build_asset_search(
+            root=root,
+            class_name=class_name,
+            name_contains=name_contains,
+            path_contains=path_contains,
+            limit=limit,
         )
 
     @mcp.tool()

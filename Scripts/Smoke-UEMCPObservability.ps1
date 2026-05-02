@@ -136,6 +136,7 @@ import sys
 from pathlib import Path
 
 from tools.observability_tools import (
+    build_asset_search,
     build_automation_test_run,
     build_automation_tests,
     build_editor_automation_readiness_diagnostic,
@@ -163,6 +164,7 @@ checks = []
 checks.append(("uemcp_ping", build_uemcp_ping()))
 checks.append(("get_editor_status", build_editor_status()))
 checks.append(("get_output_log", build_output_log(limit=5)))
+checks.append(("asset_search_game_root", build_asset_search(root="/Game", limit=20)))
 checks.append(
     (
         "get_output_log_filtered",
@@ -219,6 +221,16 @@ checks.append(
 if is_failstate_project:
     checks.append(
         (
+            "asset_search_failstate_blockout",
+            build_asset_search(
+                root="Content/Failstate/Blueprints/Blockout",
+                name_contains="BP_FSBlockout",
+                limit=50,
+            ),
+        )
+    )
+    checks.append(
+        (
             "get_editor_readiness_before_failstate_discovery",
             build_editor_readiness(timeout_seconds=60, stable_samples=2),
         )
@@ -271,6 +283,20 @@ output_log = dict(check_results["get_output_log"].get("data") or {})
 output_log_entries = output_log.get("entries") or []
 if not output_log_entries:
     failures.append("get_output_log returned no entries; expected live captured log entries")
+
+asset_search = dict(check_results["asset_search_game_root"].get("data") or {})
+asset_search_filters = dict(asset_search.get("filters") or {})
+if asset_search_filters.get("package_path") != "/Game":
+    failures.append(f"asset_search did not normalize /Game root: {asset_search}")
+if asset_search.get("returned_asset_count", 0) > 20:
+    failures.append(f"asset_search returned more assets than its limit: {asset_search}")
+for asset in asset_search.get("assets") or []:
+    package_path = str(asset.get("package_path") or "")
+    if not package_path.startswith("/Game"):
+        failures.append(f"asset_search returned an asset outside /Game: {asset}")
+    for field_name in ("asset_name", "object_path", "package_name", "package_path", "asset_class"):
+        if not asset.get(field_name):
+            failures.append(f"asset_search asset missing {field_name}: {asset}")
 
 diagnostic = dict(check_results["diagnose_editor_automation_readiness"].get("data") or {})
 diagnostic_summary = dict(diagnostic.get("summary") or {})
@@ -425,6 +451,39 @@ if not (profile_smoke_run.get("output_log_tail") or {}).get("entries"):
     failures.append("run_profile_automation_tests did not return output_log_tail entries")
 
 if is_failstate_project:
+    failstate_asset_search = dict(check_results["asset_search_failstate_blockout"].get("data") or {})
+    failstate_asset_filters = dict(failstate_asset_search.get("filters") or {})
+    failstate_assets = failstate_asset_search.get("assets") or []
+    failstate_asset_names = {
+        str(asset.get("asset_name") or "")
+        for asset in failstate_assets
+    }
+    expected_blockout_assets = {
+        "BP_FSBlockoutCover",
+        "BP_FSBlockoutFloor",
+        "BP_FSBlockoutVisualOnly",
+    }
+    if failstate_asset_filters.get("package_path") != "/Game/Failstate/Blueprints/Blockout":
+        failures.append(
+            "asset_search did not normalize Failstate blockout root: "
+            f"{failstate_asset_search}"
+        )
+    if failstate_asset_search.get("matched_asset_count", 0) < len(expected_blockout_assets):
+        failures.append(
+            "asset_search did not find enough Failstate blockout assets: "
+            f"{failstate_asset_search}"
+        )
+    missing_blockout_assets = expected_blockout_assets - failstate_asset_names
+    if missing_blockout_assets:
+        failures.append(
+            "asset_search missed expected Failstate blockout assets: "
+            f"{sorted(missing_blockout_assets)}"
+        )
+    for asset in failstate_assets:
+        package_path = str(asset.get("package_path") or "")
+        if not package_path.startswith("/Game/Failstate/Blueprints/Blockout"):
+            failures.append(f"asset_search returned outside Failstate blockout root: {asset}")
+
     failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
     returned_failstate_tests = failstate_tests.get("tests") or []
     if not returned_failstate_tests:

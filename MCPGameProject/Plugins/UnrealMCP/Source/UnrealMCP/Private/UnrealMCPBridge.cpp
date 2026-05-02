@@ -226,6 +226,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             // Editor Commands (including actor manipulation)
             else if (CommandType == TEXT("get_editor_status") ||
                      CommandType == TEXT("get_output_log") ||
+                     CommandType == TEXT("asset_search") ||
                      CommandType == TEXT("list_automation_tests") ||
                      CommandType == TEXT("run_automation_test") ||
                      CommandType == TEXT("get_actors_in_level") ||

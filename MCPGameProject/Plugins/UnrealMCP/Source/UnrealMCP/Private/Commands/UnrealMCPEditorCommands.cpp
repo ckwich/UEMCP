@@ -1,6 +1,10 @@
 #include "Commands/UnrealMCPEditorCommands.h"
 #include "Commands/UnrealMCPCommonUtils.h"
 #include "Observability/UEMCPOutputLogCapture.h"
+#include "AssetRegistry/ARFilter.h"
+#include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "Editor.h"
 #include "EditorViewportClient.h"
 #include "LevelEditorViewport.h"
@@ -18,6 +22,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/DirectionalLight.h"
@@ -118,6 +123,115 @@ namespace
 
         return nullptr;
     }
+
+    FString TrimTrailingSlashes(FString Value)
+    {
+        while (Value.Len() > 1 && Value.EndsWith(TEXT("/")))
+        {
+            Value.LeftChopInline(1);
+        }
+        return Value;
+    }
+
+    FString NormalizeAssetRoot(const FString& RawRoot)
+    {
+        FString Root = RawRoot.TrimStartAndEnd();
+        Root.ReplaceInline(TEXT("\\"), TEXT("/"));
+        Root = TrimTrailingSlashes(Root);
+
+        if (Root.IsEmpty())
+        {
+            return TEXT("/Game");
+        }
+        if (Root.Equals(TEXT("Content"), ESearchCase::IgnoreCase) ||
+            Root.Equals(TEXT("/Content"), ESearchCase::IgnoreCase))
+        {
+            return TEXT("/Game");
+        }
+        if (Root.StartsWith(TEXT("/Game"), ESearchCase::IgnoreCase) ||
+            Root.StartsWith(TEXT("/Engine"), ESearchCase::IgnoreCase) ||
+            Root.StartsWith(TEXT("/Plugin"), ESearchCase::IgnoreCase))
+        {
+            return Root;
+        }
+        if (Root.StartsWith(TEXT("Content/"), ESearchCase::IgnoreCase))
+        {
+            return TEXT("/Game/") + Root.RightChop(8);
+        }
+        if (Root.StartsWith(TEXT("/Content/"), ESearchCase::IgnoreCase))
+        {
+            return TEXT("/Game/") + Root.RightChop(9);
+        }
+
+        const FString ContentToken = TEXT("/Content/");
+        const int32 AbsoluteContentIndex = Root.Find(
+            ContentToken,
+            ESearchCase::IgnoreCase,
+            ESearchDir::FromEnd
+        );
+        if (AbsoluteContentIndex != INDEX_NONE)
+        {
+            return TEXT("/Game/") + Root.Mid(AbsoluteContentIndex + ContentToken.Len());
+        }
+
+        if (Root.StartsWith(TEXT("/"), ESearchCase::IgnoreCase))
+        {
+            return Root;
+        }
+
+        return TEXT("/Game/") + Root;
+    }
+
+    FString AssetClassShortName(const FString& AssetClassPath)
+    {
+        FString ShortName = AssetClassPath;
+
+        int32 DotIndex = INDEX_NONE;
+        if (ShortName.FindLastChar(TEXT('.'), DotIndex))
+        {
+            ShortName = ShortName.Mid(DotIndex + 1);
+        }
+
+        int32 SlashIndex = INDEX_NONE;
+        if (ShortName.FindLastChar(TEXT('/'), SlashIndex))
+        {
+            ShortName = ShortName.Mid(SlashIndex + 1);
+        }
+
+        return ShortName;
+    }
+
+    bool AssetClassMatches(
+        const FString& ClassFilter,
+        const FString& AssetClass,
+        const FString& AssetClassPath
+    )
+    {
+        return ClassFilter.IsEmpty() ||
+            AssetClass.Equals(ClassFilter, ESearchCase::IgnoreCase) ||
+            AssetClassPath.Equals(ClassFilter, ESearchCase::IgnoreCase) ||
+            AssetClassPath.Contains(ClassFilter, ESearchCase::IgnoreCase);
+    }
+
+    bool StringFilterMatches(const FString& Value, const FString& Filter)
+    {
+        return Filter.IsEmpty() || Value.Contains(Filter, ESearchCase::IgnoreCase);
+    }
+
+    TSharedPtr<FJsonObject> AssetDataToJson(const FAssetData& AssetData)
+    {
+        const FString AssetClassPath = AssetData.AssetClassPath.ToString();
+        const FString AssetClass = AssetClassShortName(AssetClassPath);
+
+        TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
+        AssetObj->SetStringField(TEXT("asset_name"), AssetData.AssetName.ToString());
+        AssetObj->SetStringField(TEXT("object_path"), AssetData.GetObjectPathString());
+        AssetObj->SetStringField(TEXT("package_name"), AssetData.PackageName.ToString());
+        AssetObj->SetStringField(TEXT("package_path"), AssetData.PackagePath.ToString());
+        AssetObj->SetStringField(TEXT("asset_class"), AssetClass);
+        AssetObj->SetStringField(TEXT("asset_class_path"), AssetClassPath);
+        return AssetObj;
+    }
 }
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
@@ -134,6 +248,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("get_output_log"))
     {
         return HandleGetOutputLog(Params);
+    }
+    else if (CommandType == TEXT("asset_search"))
+    {
+        return HandleAssetSearch(Params);
     }
     else if (CommandType == TEXT("list_automation_tests"))
     {
@@ -294,6 +412,121 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetOutputLog(const TShar
     ResultObj->SetNumberField(TEXT("buffer_capacity"), OutputLogCapture.GetCapacity());
     ResultObj->SetNumberField(TEXT("captured_entry_count"), OutputLogCapture.GetCapturedEntryCount());
     ResultObj->SetNumberField(TEXT("matched_entry_count"), MatchedEntryCount);
+    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+    ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetSearch(const TSharedPtr<FJsonObject>& Params)
+{
+    double RequestedLimit = 100.0;
+    if (Params->HasField(TEXT("limit")))
+    {
+        Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+    }
+    const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+    FString Root;
+    Params->TryGetStringField(TEXT("root"), Root);
+    const FString PackagePath = NormalizeAssetRoot(Root);
+
+    FString ClassName;
+    Params->TryGetStringField(TEXT("class_name"), ClassName);
+    ClassName = ClassName.TrimStartAndEnd();
+
+    FString NameContains;
+    Params->TryGetStringField(TEXT("name_contains"), NameContains);
+    NameContains = NameContains.TrimStartAndEnd();
+
+    FString PathContains;
+    Params->TryGetStringField(TEXT("path_contains"), PathContains);
+    PathContains = PathContains.TrimStartAndEnd();
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(*PackagePath);
+    Filter.bRecursivePaths = true;
+    Filter.bIncludeOnlyOnDiskAssets = false;
+
+    IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+        TEXT("AssetRegistry")
+    ).Get();
+
+    TArray<FAssetData> AssetDataList;
+    AssetRegistry.GetAssets(Filter, AssetDataList);
+    AssetDataList.Sort([](const FAssetData& Left, const FAssetData& Right)
+    {
+        return Left.GetObjectPathString() < Right.GetObjectPathString();
+    });
+
+    TArray<TSharedPtr<FJsonValue>> Assets;
+    Assets.Reserve(FMath::Min(Limit, AssetDataList.Num()));
+
+    int32 MatchedAssetCount = 0;
+    for (const FAssetData& AssetData : AssetDataList)
+    {
+        const FString AssetName = AssetData.AssetName.ToString();
+        const FString ObjectPath = AssetData.GetObjectPathString();
+        const FString PackageName = AssetData.PackageName.ToString();
+        const FString AssetClassPath = AssetData.AssetClassPath.ToString();
+        const FString AssetClass = AssetClassShortName(AssetClassPath);
+
+        if (!AssetClassMatches(ClassName, AssetClass, AssetClassPath))
+        {
+            continue;
+        }
+        if (!StringFilterMatches(AssetName, NameContains))
+        {
+            continue;
+        }
+        if (!StringFilterMatches(ObjectPath, PathContains) &&
+            !StringFilterMatches(PackageName, PathContains))
+        {
+            continue;
+        }
+
+        ++MatchedAssetCount;
+        if (Assets.Num() < Limit)
+        {
+            Assets.Add(MakeShared<FJsonValueObject>(AssetDataToJson(AssetData)));
+        }
+    }
+
+    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+    FiltersObj->SetNumberField(TEXT("limit"), Limit);
+    if (!Root.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("root"), Root);
+    }
+    FiltersObj->SetStringField(TEXT("package_path"), PackagePath);
+    if (!ClassName.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("class_name"), ClassName);
+    }
+    if (!NameContains.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("name_contains"), NameContains);
+    }
+    if (!PathContains.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("path_contains"), PathContains);
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Warnings;
+    if (AssetRegistry.IsLoadingAssets())
+    {
+        Warnings.Add(MakeShared<FJsonValueString>(
+            TEXT("Asset Registry is still loading assets; results may be incomplete")
+        ));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("assets"), Assets);
+    ResultObj->SetNumberField(TEXT("total_asset_count"), AssetDataList.Num());
+    ResultObj->SetNumberField(TEXT("matched_asset_count"), MatchedAssetCount);
+    ResultObj->SetNumberField(TEXT("returned_asset_count"), Assets.Num());
+    ResultObj->SetBoolField(TEXT("truncated"), MatchedAssetCount > Assets.Num());
+    ResultObj->SetBoolField(TEXT("asset_registry_loading"), AssetRegistry.IsLoadingAssets());
     ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
     ResultObj->SetArrayField(TEXT("warnings"), Warnings);
 
