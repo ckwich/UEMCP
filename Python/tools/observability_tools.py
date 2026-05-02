@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections import deque
+from threading import Lock
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -12,6 +14,7 @@ from uemcp_observability import (
     build_error_envelope,
     build_success_envelope,
     execute_bridge_command,
+    format_timestamp,
     get_failstate_context_data,
     server_metadata,
     utc_now,
@@ -22,6 +25,18 @@ logger = logging.getLogger("UnrealMCP")
 MAX_PROFILE_AUTOMATION_RUNS = 50
 MAX_EVENT_SNIPPETS = 5
 MAX_READINESS_SAMPLES = 5
+MAX_OBSERVABILITY_HISTORY_EVENTS = 100
+
+_OBSERVABILITY_HISTORY_LOCK = Lock()
+_OBSERVABILITY_HISTORY: Deque[Dict[str, Any]] = deque(
+    maxlen=MAX_OBSERVABILITY_HISTORY_EVENTS
+)
+_OBSERVABILITY_HISTORY_SEQUENCE = 0
+_HISTORY_RECORDED_TOOLS = {
+    "get_editor_readiness",
+    "diagnose_editor_automation_readiness",
+    "run_profile_automation_tests",
+}
 
 
 def _default_connection_factory():
@@ -57,6 +72,226 @@ def _event_snippets(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         }
         snippets.append({key: value for key, value in snippet.items() if value not in (None, "")})
     return snippets
+
+
+def clear_observability_history() -> None:
+    global _OBSERVABILITY_HISTORY_SEQUENCE
+    with _OBSERVABILITY_HISTORY_LOCK:
+        _OBSERVABILITY_HISTORY.clear()
+        _OBSERVABILITY_HISTORY_SEQUENCE = 0
+
+
+def _observability_events_from_envelope(envelope: Dict[str, Any]) -> List[Dict[str, Any]]:
+    data = envelope.get("data")
+    if isinstance(data, dict):
+        events = data.get("observability_events")
+        if isinstance(events, list):
+            return [dict(event) for event in events if isinstance(event, dict)]
+
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        raw = error.get("raw")
+        if isinstance(raw, dict):
+            events = raw.get("observability_events")
+            if isinstance(events, list):
+                return [dict(event) for event in events if isinstance(event, dict)]
+
+    return []
+
+
+def _history_status_request_ids(raw: Dict[str, Any]) -> List[str]:
+    request_ids: List[str] = []
+    for sample in raw.get("samples") or []:
+        if not isinstance(sample, dict):
+            continue
+        request_id = sample.get("request_id")
+        if request_id:
+            request_ids.append(str(request_id))
+    return request_ids
+
+
+def _history_evidence_refs(
+    envelope: Dict[str, Any],
+    events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    data = envelope.get("data")
+    if isinstance(data, dict):
+        evidence_refs = data.get("evidence_refs")
+        if isinstance(evidence_refs, dict):
+            return dict(evidence_refs)
+        if envelope.get("tool") == "get_editor_readiness":
+            return {
+                "readiness_request_id": envelope.get("request_id"),
+                "status_request_ids": _history_status_request_ids(data),
+            }
+
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        raw = error.get("raw")
+        if isinstance(raw, dict):
+            evidence_refs = raw.get("evidence_refs")
+            if isinstance(evidence_refs, dict):
+                return dict(evidence_refs)
+            readiness_request_id = raw.get("readiness_request_id")
+            status_request_ids = _history_status_request_ids(raw)
+            if readiness_request_id or status_request_ids:
+                return {
+                    "readiness_request_id": readiness_request_id,
+                    "status_request_ids": status_request_ids,
+                }
+
+    for event in events:
+        evidence_refs = event.get("evidence_refs")
+        if isinstance(evidence_refs, dict):
+            return dict(evidence_refs)
+
+    return {"request_id": envelope.get("request_id")}
+
+
+def _history_summary(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    tool = envelope.get("tool")
+    data = envelope.get("data")
+    if isinstance(data, dict):
+        if tool == "get_editor_readiness":
+            return {
+                "ready": bool(data.get("ready", False)),
+                "state": data.get("state"),
+                "blocking_reasons": list(data.get("blocking_reasons") or []),
+            }
+        if tool == "diagnose_editor_automation_readiness":
+            summary = dict(data.get("summary") or {})
+            summary["ready_for_automation"] = bool(data.get("ready_for_automation", False))
+            return summary
+        if tool == "run_profile_automation_tests":
+            return dict(data.get("summary") or {})
+
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        raw = error.get("raw")
+        if isinstance(raw, dict):
+            return {
+                "ready": bool(raw.get("ready", False)),
+                "state": raw.get("state"),
+                "blocking_reasons": list(raw.get("blocking_reasons") or []),
+            }
+
+    return {}
+
+
+def _history_failure_category(
+    envelope: Dict[str, Any],
+    summary: Dict[str, Any],
+    events: List[Dict[str, Any]],
+) -> Optional[str]:
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        category = error.get("category")
+        return str(category) if category else None
+
+    for event in events:
+        category = event.get("failure_category")
+        if category:
+            return str(category)
+
+    tool = envelope.get("tool")
+    data = envelope.get("data")
+    if tool == "diagnose_editor_automation_readiness":
+        category = summary.get("first_blocking_category")
+        return str(category) if category else None
+    if tool == "get_editor_readiness" and isinstance(data, dict) and not data.get("ready"):
+        readiness = {
+            "state": data.get("state"),
+            "blocking_reasons": list(data.get("blocking_reasons") or []),
+            "samples": list(data.get("samples") or []),
+        }
+        return _readiness_failure_category(readiness)
+    if tool == "run_profile_automation_tests" and summary.get("successful") is False:
+        return "automation_failed"
+
+    return None
+
+
+def _history_message(
+    envelope: Dict[str, Any],
+    summary: Dict[str, Any],
+    events: List[Dict[str, Any]],
+) -> Optional[str]:
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        return str(message) if message else None
+
+    message = summary.get("first_blocking_message")
+    if message:
+        return str(message)
+
+    for event in events:
+        event_message = event.get("message")
+        if event_message:
+            return str(event_message)
+
+    tool = envelope.get("tool")
+    if tool == "get_editor_readiness":
+        return "Editor is ready for automation" if summary.get("ready") else "Editor is not ready"
+    if tool == "diagnose_editor_automation_readiness":
+        return (
+            "Editor is ready for automation"
+            if summary.get("ready_for_automation")
+            else "Editor automation readiness diagnostic is blocked"
+        )
+    if tool == "run_profile_automation_tests":
+        return (
+            "Profile automation run completed successfully"
+            if summary.get("successful")
+            else "Profile automation run completed with failures"
+        )
+    return None
+
+
+def _history_successful(envelope: Dict[str, Any], summary: Dict[str, Any]) -> bool:
+    if not envelope.get("ok"):
+        return False
+    tool = envelope.get("tool")
+    if tool == "get_editor_readiness":
+        return bool(summary.get("ready"))
+    if tool == "diagnose_editor_automation_readiness":
+        return bool(summary.get("ready_for_automation"))
+    if tool == "run_profile_automation_tests":
+        return bool(summary.get("successful"))
+    return True
+
+
+def _history_entry_from_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    summary = _history_summary(envelope)
+    events = _observability_events_from_envelope(envelope)
+    failure_category = _history_failure_category(envelope, summary, events)
+    return {
+        "recorded_at": format_timestamp(utc_now()),
+        "tool": envelope.get("tool"),
+        "request_id": envelope.get("request_id"),
+        "ok": bool(envelope.get("ok")),
+        "successful": _history_successful(envelope, summary),
+        "failure_category": failure_category,
+        "message": _history_message(envelope, summary, events),
+        "summary": summary,
+        "observability_events": events,
+        "evidence_refs": _history_evidence_refs(envelope, events),
+        "editor": dict(envelope.get("editor") or {}),
+        "warnings": list(envelope.get("warnings") or []),
+    }
+
+
+def _record_observability_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    if envelope.get("tool") not in _HISTORY_RECORDED_TOOLS:
+        return envelope
+
+    global _OBSERVABILITY_HISTORY_SEQUENCE
+    entry = _history_entry_from_envelope(envelope)
+    with _OBSERVABILITY_HISTORY_LOCK:
+        _OBSERVABILITY_HISTORY_SEQUENCE += 1
+        entry["sequence"] = _OBSERVABILITY_HISTORY_SEQUENCE
+        _OBSERVABILITY_HISTORY.append(entry)
+    return envelope
 
 
 def _compact_run_result(run_envelope: Dict[str, Any], requested_test_name: str) -> Dict[str, Any]:
@@ -386,12 +621,14 @@ def build_editor_readiness(
     if state == "timeout":
         warnings.append("Timed out waiting for editor readiness")
 
-    return build_success_envelope(
-        tool="get_editor_readiness",
-        started_at=started_at,
-        data=data,
-        warnings=warnings,
-        editor=_editor_identity(latest_status),
+    return _record_observability_envelope(
+        build_success_envelope(
+            tool="get_editor_readiness",
+            started_at=started_at,
+            data=data,
+            warnings=warnings,
+            editor=_editor_identity(latest_status),
+        )
     )
 
 
@@ -611,11 +848,56 @@ def build_editor_automation_readiness_diagnostic(
         },
     }
 
+    return _record_observability_envelope(
+        build_success_envelope(
+            tool="diagnose_editor_automation_readiness",
+            started_at=started_at,
+            data=data,
+            editor=_editor_identity(status_data or readiness.get("latest_status") or {}),
+        )
+    )
+
+
+def build_observability_recent_events(
+    *,
+    tool: Optional[str] = None,
+    limit: int = 20,
+    include_success: bool = True,
+    newest_first: bool = True,
+) -> Dict[str, Any]:
+    started_at = utc_now()
+    bounded_limit = max(1, min(int(limit), MAX_OBSERVABILITY_HISTORY_EVENTS))
+
+    with _OBSERVABILITY_HISTORY_LOCK:
+        snapshot = [dict(entry) for entry in _OBSERVABILITY_HISTORY]
+
+    filtered_entries = [
+        entry
+        for entry in snapshot
+        if (tool is None or entry.get("tool") == tool)
+        and (include_success or not entry.get("successful"))
+    ]
+    if newest_first:
+        filtered_entries = list(reversed(filtered_entries))
+    entries = filtered_entries[:bounded_limit]
+
+    data = {
+        "entries": entries,
+        "returned_count": len(entries),
+        "total_recorded": len(snapshot),
+        "history_capacity": MAX_OBSERVABILITY_HISTORY_EVENTS,
+        "filters": {
+            "tool": tool,
+            "limit": bounded_limit,
+            "include_success": bool(include_success),
+            "newest_first": bool(newest_first),
+        },
+    }
+
     return build_success_envelope(
-        tool="diagnose_editor_automation_readiness",
+        tool="get_observability_recent_events",
         started_at=started_at,
         data=data,
-        editor=_editor_identity(status_data or readiness.get("latest_status") or {}),
     )
 
 
@@ -646,12 +928,14 @@ def build_profile_automation_run(
     mode = "single" if test_name else "prefix"
     resolved_prefix = prefix or _first_automation_prefix(profile)
     if mode == "prefix" and not resolved_prefix:
-        return build_error_envelope(
-            tool="run_profile_automation_tests",
-            started_at=started_at,
-            message=f"Profile '{profile_name}' does not define an automation test prefix",
-            category="invalid_params",
-            warnings=warnings,
+        return _record_observability_envelope(
+            build_error_envelope(
+                tool="run_profile_automation_tests",
+                started_at=started_at,
+                message=f"Profile '{profile_name}' does not define an automation test prefix",
+                category="invalid_params",
+                warnings=warnings,
+            )
         )
 
     readiness = None
@@ -669,14 +953,16 @@ def build_profile_automation_run(
             raw_readiness = dict(readiness)
             raw_readiness["failure_category"] = readiness_event["failure_category"]
             raw_readiness["observability_events"] = [readiness_event]
-            return build_error_envelope(
-                tool="run_profile_automation_tests",
-                started_at=started_at,
-                message=readiness_event["message"],
-                category=readiness_event["failure_category"],
-                raw=raw_readiness,
-                warnings=warnings + list(readiness_envelope.get("warnings") or []),
-                editor=_editor_identity(readiness["latest_status"]),
+            return _record_observability_envelope(
+                build_error_envelope(
+                    tool="run_profile_automation_tests",
+                    started_at=started_at,
+                    message=readiness_event["message"],
+                    category=readiness_event["failure_category"],
+                    raw=raw_readiness,
+                    warnings=warnings + list(readiness_envelope.get("warnings") or []),
+                    editor=_editor_identity(readiness["latest_status"]),
+                )
             )
         warnings.extend(readiness_envelope.get("warnings") or [])
 
@@ -691,13 +977,15 @@ def build_profile_automation_run(
             limit=bounded_limit,
         )
         if not discovery_envelope.get("ok"):
-            return build_error_envelope(
-                tool="run_profile_automation_tests",
-                started_at=started_at,
-                message=f"Failed to discover automation tests for prefix '{resolved_prefix}'",
-                category="automation_failed",
-                raw=discovery_envelope.get("error"),
-                warnings=warnings,
+            return _record_observability_envelope(
+                build_error_envelope(
+                    tool="run_profile_automation_tests",
+                    started_at=started_at,
+                    message=f"Failed to discover automation tests for prefix '{resolved_prefix}'",
+                    category="automation_failed",
+                    raw=discovery_envelope.get("error"),
+                    warnings=warnings,
+                )
             )
 
         discovery_data = dict(discovery_envelope.get("data") or {})
@@ -772,11 +1060,13 @@ def build_profile_automation_run(
         },
     }
 
-    return build_success_envelope(
-        tool="run_profile_automation_tests",
-        started_at=started_at,
-        data=data,
-        warnings=warnings,
+    return _record_observability_envelope(
+        build_success_envelope(
+            tool="run_profile_automation_tests",
+            started_at=started_at,
+            data=data,
+            warnings=warnings,
+        )
     )
 
 
@@ -836,6 +1126,22 @@ def register_observability_tools(mcp: FastMCP):
             readiness_poll_interval_seconds=readiness_poll_interval_seconds,
             readiness_settle_seconds=readiness_settle_seconds,
             output_log_limit=output_log_limit,
+        )
+
+    @mcp.tool()
+    def get_observability_recent_events(
+        ctx: Context,
+        tool: Optional[str] = None,
+        limit: int = 20,
+        include_success: bool = True,
+        newest_first: bool = True,
+    ) -> Dict[str, Any]:
+        """Return recent high-level observability results without querying the editor."""
+        return build_observability_recent_events(
+            tool=tool,
+            limit=limit,
+            include_success=include_success,
+            newest_first=newest_first,
         )
 
     @mcp.tool()

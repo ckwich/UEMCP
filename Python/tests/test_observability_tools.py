@@ -5,9 +5,11 @@ from tools.observability_tools import (
     build_editor_status,
     build_editor_readiness,
     build_failstate_context,
+    build_observability_recent_events,
     build_output_log,
     build_profile_automation_run,
     build_uemcp_ping,
+    clear_observability_history,
 )
 
 
@@ -44,6 +46,10 @@ class FakeClock:
     def sleep(self, seconds):
         self.sleeps.append(seconds)
         self.now += seconds
+
+
+def setup_function():
+    clear_observability_history()
 
 
 def test_build_uemcp_ping_returns_ok_envelope_for_bridge_success():
@@ -529,6 +535,168 @@ def test_build_editor_automation_readiness_diagnostic_preserves_connection_failu
     assert data["evidence_refs"]["status_request_id"].startswith("get_editor_status-")
     assert data["evidence_refs"]["readiness_request_id"].startswith("get_editor_readiness-")
     assert data["evidence_refs"]["output_log_request_id"].startswith("get_output_log-")
+
+
+def test_build_observability_recent_events_returns_compact_history_without_bridge_calls():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "project_path": "C:/Dev/Failstate/Failstate.uproject",
+                "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                "is_pie_running": False,
+                "is_slow_task_active": False,
+            },
+        }
+    )
+
+    readiness = build_editor_readiness(lambda: connection)
+    call_count_before_history_read = len(connection.calls)
+    history = build_observability_recent_events(limit=5)
+
+    assert readiness["ok"] is True
+    assert history["ok"] is True
+    assert history["tool"] == "get_observability_recent_events"
+    assert len(connection.calls) == call_count_before_history_read
+
+    data = history["data"]
+    assert data["returned_count"] == 1
+    assert data["total_recorded"] == 1
+    assert data["history_capacity"] == 100
+    assert data["filters"] == {
+        "tool": None,
+        "limit": 5,
+        "include_success": True,
+        "newest_first": True,
+    }
+    entry = data["entries"][0]
+    assert entry["sequence"] == 1
+    assert entry["tool"] == "get_editor_readiness"
+    assert entry["request_id"] == readiness["request_id"]
+    assert entry["ok"] is True
+    assert entry["successful"] is True
+    assert entry["summary"] == {
+        "ready": True,
+        "state": "ready",
+        "blocking_reasons": [],
+    }
+    assert entry["observability_events"] == []
+    assert entry["evidence_refs"] == {
+        "readiness_request_id": readiness["request_id"],
+        "status_request_ids": [readiness["data"]["samples"][0]["request_id"]],
+    }
+
+
+def test_build_observability_recent_events_filters_blocked_diagnostics():
+    ready_connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                "is_pie_running": False,
+                "is_slow_task_active": False,
+            },
+        }
+    )
+    blocked_connection = SequenceUnrealConnection(
+        [
+            {"status": "success", "result": {"message": "pong"}},
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": True,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": True,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "entries": [],
+                    "truncated": False,
+                    "matched_entry_count": 0,
+                },
+            },
+        ]
+    )
+
+    build_editor_readiness(lambda: ready_connection)
+    diagnostic = build_editor_automation_readiness_diagnostic(
+        lambda: blocked_connection,
+        output_log_limit=1,
+    )
+
+    history = build_observability_recent_events(
+        tool="diagnose_editor_automation_readiness",
+        include_success=False,
+    )
+
+    data = history["data"]
+    assert data["returned_count"] == 1
+    assert data["total_recorded"] == 3
+    assert data["filters"]["tool"] == "diagnose_editor_automation_readiness"
+    assert data["filters"]["include_success"] is False
+
+    entry = data["entries"][0]
+    assert entry["tool"] == "diagnose_editor_automation_readiness"
+    assert entry["request_id"] == diagnostic["request_id"]
+    assert entry["ok"] is True
+    assert entry["successful"] is False
+    assert entry["failure_category"] == "editor_busy"
+    assert entry["message"] == "Editor is not ready for automation: play_in_editor_running"
+    assert entry["summary"] == {
+        "state": "blocked",
+        "first_blocking_category": "editor_busy",
+        "first_blocking_message": "Editor is not ready for automation: play_in_editor_running",
+        "ready_for_automation": False,
+    }
+    assert entry["observability_events"] == diagnostic["data"]["observability_events"]
+    assert entry["evidence_refs"] == diagnostic["data"]["evidence_refs"]
+
+
+def test_build_observability_recent_events_records_profile_preflight_failures():
+    profile_run = build_profile_automation_run(
+        lambda: None,
+        profile_name="failstate",
+        limit=2,
+        output_log_limit=0,
+    )
+
+    history = build_observability_recent_events(
+        tool="run_profile_automation_tests",
+        include_success=False,
+    )
+
+    assert profile_run["ok"] is False
+    data = history["data"]
+    assert data["returned_count"] == 1
+    assert data["total_recorded"] == 2
+
+    entry = data["entries"][0]
+    assert entry["tool"] == "run_profile_automation_tests"
+    assert entry["request_id"] == profile_run["request_id"]
+    assert entry["ok"] is False
+    assert entry["successful"] is False
+    assert entry["failure_category"] == "connection_failed"
+    assert "connection_failed" in entry["message"]
+    assert entry["summary"] == {
+        "ready": False,
+        "state": "blocked",
+        "blocking_reasons": ["editor_status_unavailable"],
+    }
+    assert entry["observability_events"] == profile_run["error"]["raw"]["observability_events"]
+    assert entry["evidence_refs"] == {
+        "readiness_request_id": profile_run["error"]["raw"]["readiness_request_id"],
+        "status_request_ids": [profile_run["error"]["raw"]["samples"][0]["request_id"]],
+    }
 
 
 def test_build_profile_automation_run_blocks_when_editor_is_not_ready():

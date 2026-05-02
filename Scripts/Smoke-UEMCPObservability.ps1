@@ -142,6 +142,7 @@ from tools.observability_tools import (
     build_editor_readiness,
     build_editor_status,
     build_failstate_context,
+    build_observability_recent_events,
     build_output_log,
     build_profile_automation_run,
     build_uemcp_ping,
@@ -243,6 +244,8 @@ if is_failstate_project:
         )
     )
 
+checks.append(("get_observability_recent_events", build_observability_recent_events(limit=50)))
+
 check_results = {name: result for name, result in checks}
 
 failures = []
@@ -300,6 +303,30 @@ for ref_name in (
 ):
     if not diagnostic_refs.get(ref_name):
         failures.append(f"diagnose_editor_automation_readiness missing evidence ref {ref_name}")
+
+recent_events = dict(check_results["get_observability_recent_events"].get("data") or {})
+recent_entries = recent_events.get("entries") or []
+recent_tools = {str(entry.get("tool")) for entry in recent_entries}
+for required_tool in (
+    "get_editor_readiness",
+    "diagnose_editor_automation_readiness",
+    "run_profile_automation_tests",
+):
+    if required_tool not in recent_tools:
+        failures.append(
+            "get_observability_recent_events did not return recent "
+            f"{required_tool!r} history: {recent_events}"
+        )
+if "get_observability_recent_events" in recent_tools:
+    failures.append("get_observability_recent_events recorded its own read into history")
+for entry in recent_entries:
+    if entry.get("successful") is not True:
+        failures.append(f"get_observability_recent_events returned an unexpected failure: {entry}")
+if recent_events.get("history_capacity") != 100:
+    failures.append(
+        "get_observability_recent_events returned unexpected history capacity: "
+        f"{recent_events}"
+    )
 
 placeholder_warning = "Historical output log capture is not wired yet"
 for warning in output_log.get("warnings") or []:
