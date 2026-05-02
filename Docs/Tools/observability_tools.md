@@ -2,6 +2,8 @@
 
 These tools are the first UEMCP surface. They are read-mostly and designed to prove the live Unreal Editor state before any mutating automation runs.
 
+For the canonical Phase 1 agent workflow and local profile boundary, see [Phase 1 Observability Workflow](../Workflows/phase-1-observability.md).
+
 All observability tools return the same envelope shape:
 
 - `ok`: true when the tool completed.
