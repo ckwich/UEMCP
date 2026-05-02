@@ -6,11 +6,16 @@
 #include "LevelEditorViewport.h"
 #include "ImageUtils.h"
 #include "HighResScreenshot.h"
+#include "CoreGlobals.h"
 #include "Engine/GameViewportClient.h"
 #include "Misc/FileHelper.h"
 #include "GameFramework/Actor.h"
 #include "Engine/Selection.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/App.h"
+#include "Misc/AutomationEvent.h"
+#include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/Paths.h"
 #include "Kismet/GameplayStatics.h"
@@ -29,6 +34,90 @@
 namespace
 {
     constexpr const TCHAR* UEMCPPluginVersion = TEXT("0.1.0");
+    constexpr int32 MaxAutomationEventEntries = 50;
+
+    FString AutomationEventTypeToString(EAutomationEventType EventType)
+    {
+        switch (EventType)
+        {
+            case EAutomationEventType::Info:
+                return TEXT("info");
+            case EAutomationEventType::Warning:
+                return TEXT("warning");
+            case EAutomationEventType::Error:
+                return TEXT("error");
+            default:
+                return TEXT("unknown");
+        }
+    }
+
+    TSharedPtr<FJsonObject> AutomationTestInfoToJson(const FAutomationTestInfo& TestInfo)
+    {
+        TSharedPtr<FJsonObject> TestObj = MakeShared<FJsonObject>();
+        TestObj->SetStringField(TEXT("display_name"), TestInfo.GetDisplayName());
+        TestObj->SetStringField(TEXT("full_test_path"), TestInfo.GetFullTestPath());
+        TestObj->SetStringField(TEXT("test_name"), TestInfo.GetTestName());
+        TestObj->SetStringField(TEXT("tags"), TestInfo.GetTestTags());
+        TestObj->SetStringField(TEXT("test_parameter"), TestInfo.GetTestParameter());
+        TestObj->SetStringField(TEXT("source_file"), TestInfo.GetSourceFile());
+        TestObj->SetNumberField(TEXT("source_line"), TestInfo.GetSourceFileLine());
+        TestObj->SetStringField(TEXT("asset_path"), TestInfo.GetAssetPath());
+        TestObj->SetStringField(TEXT("open_command"), TestInfo.GetOpenCommand());
+        TestObj->SetNumberField(TEXT("flags"), static_cast<double>(static_cast<uint32>(TestInfo.GetTestFlags())));
+        TestObj->SetNumberField(TEXT("participants_required"), TestInfo.GetNumParticipantsRequired());
+        return TestObj;
+    }
+
+    TSharedPtr<FJsonObject> AutomationExecutionEntryToJson(const FAutomationExecutionEntry& Entry)
+    {
+        TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
+        EntryObj->SetStringField(TEXT("type"), AutomationEventTypeToString(Entry.Event.Type));
+        EntryObj->SetStringField(TEXT("message"), Entry.Event.Message);
+        EntryObj->SetStringField(TEXT("context"), Entry.Event.Context);
+        EntryObj->SetStringField(TEXT("filename"), Entry.Filename);
+        EntryObj->SetNumberField(TEXT("line_number"), Entry.LineNumber);
+        EntryObj->SetStringField(TEXT("timestamp_utc"), Entry.Timestamp.ToIso8601());
+        EntryObj->SetStringField(TEXT("formatted"), Entry.ToString());
+        return EntryObj;
+    }
+
+    bool AutomationTestMatchesPrefix(const FAutomationTestInfo& TestInfo, const FString& Prefix)
+    {
+        return Prefix.IsEmpty() ||
+            TestInfo.GetFullTestPath().StartsWith(Prefix, ESearchCase::IgnoreCase) ||
+            TestInfo.GetTestName().StartsWith(Prefix, ESearchCase::IgnoreCase);
+    }
+
+    TArray<FAutomationTestInfo> GetCurrentAutomationTests()
+    {
+        FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
+        Framework.LoadTestModules();
+
+        TArray<FAutomationTestInfo> TestInfos;
+        Framework.GetValidTestNames(TestInfos);
+        TestInfos.Sort([](const FAutomationTestInfo& Left, const FAutomationTestInfo& Right)
+        {
+            return Left.GetFullTestPath() < Right.GetFullTestPath();
+        });
+        return TestInfos;
+    }
+
+    const FAutomationTestInfo* FindAutomationTestByName(
+        const TArray<FAutomationTestInfo>& TestInfos,
+        const FString& RequestedTestName
+    )
+    {
+        for (const FAutomationTestInfo& TestInfo : TestInfos)
+        {
+            if (TestInfo.GetFullTestPath().Equals(RequestedTestName, ESearchCase::IgnoreCase) ||
+                TestInfo.GetTestName().Equals(RequestedTestName, ESearchCase::IgnoreCase))
+            {
+                return &TestInfo;
+            }
+        }
+
+        return nullptr;
+    }
 }
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
@@ -45,6 +134,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("get_output_log"))
     {
         return HandleGetOutputLog(Params);
+    }
+    else if (CommandType == TEXT("list_automation_tests"))
+    {
+        return HandleListAutomationTests(Params);
+    }
+    else if (CommandType == TEXT("run_automation_test"))
+    {
+        return HandleRunAutomationTest(Params);
     }
     // Actor manipulation commands
     else if (CommandType == TEXT("get_actors_in_level"))
@@ -198,6 +295,181 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetOutputLog(const TShar
     ResultObj->SetNumberField(TEXT("matched_entry_count"), MatchedEntryCount);
     ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
     ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params)
+{
+    double RequestedLimit = 200.0;
+    if (Params->HasField(TEXT("limit")))
+    {
+        Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+    }
+    const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+    FString Prefix;
+    Params->TryGetStringField(TEXT("prefix"), Prefix);
+
+    const TArray<FAutomationTestInfo> TestInfos = GetCurrentAutomationTests();
+
+    TArray<TSharedPtr<FJsonValue>> Tests;
+    Tests.Reserve(FMath::Min(Limit, TestInfos.Num()));
+
+    int32 MatchedTestCount = 0;
+    for (const FAutomationTestInfo& TestInfo : TestInfos)
+    {
+        if (!AutomationTestMatchesPrefix(TestInfo, Prefix))
+        {
+            continue;
+        }
+
+        ++MatchedTestCount;
+        if (Tests.Num() < Limit)
+        {
+            Tests.Add(MakeShared<FJsonValueObject>(AutomationTestInfoToJson(TestInfo)));
+        }
+    }
+
+    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+    FiltersObj->SetNumberField(TEXT("limit"), Limit);
+    if (!Prefix.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("prefix"), Prefix);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("tests"), Tests);
+    ResultObj->SetNumberField(TEXT("total_valid_test_count"), TestInfos.Num());
+    ResultObj->SetNumberField(TEXT("matched_test_count"), MatchedTestCount);
+    ResultObj->SetNumberField(TEXT("returned_test_count"), Tests.Num());
+    ResultObj->SetBoolField(TEXT("truncated"), MatchedTestCount > Tests.Num());
+    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params)
+{
+    FString RequestedTestName;
+    if (!Params->TryGetStringField(TEXT("test_name"), RequestedTestName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'test_name' parameter"));
+    }
+
+    RequestedTestName = RequestedTestName.TrimStartAndEnd();
+    if (RequestedTestName.IsEmpty())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Invalid 'test_name' parameter: value cannot be empty"));
+    }
+
+    double RequestedTimeoutSeconds = 30.0;
+    if (Params->HasField(TEXT("timeout_seconds")))
+    {
+        Params->TryGetNumberField(TEXT("timeout_seconds"), RequestedTimeoutSeconds);
+    }
+    const double TimeoutSeconds = FMath::Clamp(RequestedTimeoutSeconds, 1.0, 120.0);
+
+    if (GIsSlowTask)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Automation tests cannot run while an editor slow task is active"));
+    }
+
+    if (GIsPlayInEditorWorld || (GEditor && GEditor->PlayWorld != nullptr))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Automation tests cannot run while Play In Editor is active"));
+    }
+
+    const TArray<FAutomationTestInfo> TestInfos = GetCurrentAutomationTests();
+    const FAutomationTestInfo* MatchedTestInfo = FindAutomationTestByName(TestInfos, RequestedTestName);
+    if (!MatchedTestInfo)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Automation test not found: %s"), *RequestedTestName));
+    }
+
+    FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
+    const FString TestCommand = MatchedTestInfo->GetTestName();
+    const FString FullTestPath = MatchedTestInfo->GetFullTestPath();
+
+    if (!Framework.ContainsTest(TestCommand))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Automation test is not runnable by command name: %s"), *TestCommand));
+    }
+
+    const double StartedAtSeconds = FPlatformTime::Seconds();
+    Framework.DequeueAllCommands();
+    Framework.StartTestByName(TestCommand, 0, FullTestPath);
+
+    if (!GIsAutomationTesting)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Automation test did not start: %s"), *FullTestPath));
+    }
+
+    bool bTimedOut = false;
+    while (!Framework.IsLatentCommandQueueEmpty())
+    {
+        Framework.ExecuteNetworkCommands();
+        Framework.ExecuteLatentCommands();
+
+        if (Framework.IsLatentCommandQueueEmpty())
+        {
+            break;
+        }
+
+        if ((FPlatformTime::Seconds() - StartedAtSeconds) > TimeoutSeconds)
+        {
+            bTimedOut = true;
+            Framework.DequeueAllCommands();
+            break;
+        }
+
+        FPlatformProcess::Sleep(0.01f);
+    }
+
+    FAutomationTestExecutionInfo ExecutionInfo;
+    const bool bFrameworkSuccess = Framework.StopTest(ExecutionInfo);
+    const bool bSuccessful = bFrameworkSuccess && !bTimedOut;
+
+    TArray<TSharedPtr<FJsonValue>> Events;
+    const TArray<FAutomationExecutionEntry>& Entries = ExecutionInfo.GetEntries();
+    Events.Reserve(FMath::Min(MaxAutomationEventEntries, Entries.Num() + (bTimedOut ? 1 : 0)));
+
+    if (bTimedOut)
+    {
+        TSharedPtr<FJsonObject> TimeoutEventObj = MakeShared<FJsonObject>();
+        TimeoutEventObj->SetStringField(TEXT("type"), TEXT("error"));
+        TimeoutEventObj->SetStringField(TEXT("message"), FString::Printf(TEXT("Automation test timed out after %.2f seconds"), TimeoutSeconds));
+        TimeoutEventObj->SetStringField(TEXT("context"), TEXT("UEMCP"));
+        TimeoutEventObj->SetStringField(TEXT("filename"), TEXT(""));
+        TimeoutEventObj->SetNumberField(TEXT("line_number"), -1);
+        TimeoutEventObj->SetStringField(TEXT("timestamp_utc"), FDateTime::UtcNow().ToIso8601());
+        TimeoutEventObj->SetStringField(TEXT("formatted"), TimeoutEventObj->GetStringField(TEXT("message")));
+        Events.Add(MakeShared<FJsonValueObject>(TimeoutEventObj));
+    }
+
+    for (const FAutomationExecutionEntry& Entry : Entries)
+    {
+        if (Events.Num() >= MaxAutomationEventEntries)
+        {
+            break;
+        }
+        Events.Add(MakeShared<FJsonValueObject>(AutomationExecutionEntryToJson(Entry)));
+    }
+
+    const double DurationSeconds = FPlatformTime::Seconds() - StartedAtSeconds;
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetObjectField(TEXT("test"), AutomationTestInfoToJson(*MatchedTestInfo));
+    ResultObj->SetStringField(TEXT("status"), bTimedOut ? TEXT("timed_out") : (bSuccessful ? TEXT("passed") : TEXT("failed")));
+    ResultObj->SetBoolField(TEXT("successful"), bSuccessful);
+    ResultObj->SetBoolField(TEXT("timed_out"), bTimedOut);
+    ResultObj->SetNumberField(TEXT("duration_seconds"), DurationSeconds);
+    ResultObj->SetNumberField(TEXT("reported_duration_seconds"), ExecutionInfo.Duration);
+    ResultObj->SetNumberField(TEXT("error_count"), ExecutionInfo.GetErrorTotal() + (bTimedOut ? 1 : 0));
+    ResultObj->SetNumberField(TEXT("warning_count"), ExecutionInfo.GetWarningTotal());
+    ResultObj->SetNumberField(TEXT("event_count"), Entries.Num() + (bTimedOut ? 1 : 0));
+    ResultObj->SetBoolField(TEXT("events_truncated"), (Entries.Num() + (bTimedOut ? 1 : 0)) > Events.Num());
+    ResultObj->SetArrayField(TEXT("events"), Events);
 
     return ResultObj;
 }

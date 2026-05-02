@@ -1,4 +1,6 @@
 from tools.observability_tools import (
+    build_automation_test_run,
+    build_automation_tests,
     build_editor_status,
     build_failstate_context,
     build_output_log,
@@ -95,6 +97,95 @@ def test_build_output_log_passes_bounded_filters_to_bridge():
                 "category": "LogTemp",
                 "verbosity": "Warning",
                 "contains": "ready",
+            },
+        )
+    ]
+
+
+def test_build_automation_tests_passes_bounded_prefix_query_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "tests": [
+                    {
+                        "full_test_path": "Failstate.Phase1.Weapon.IntervalMath",
+                        "test_name": "Failstate.Phase1.Weapon.IntervalMath",
+                    }
+                ],
+                "truncated": False,
+            },
+        }
+    )
+
+    envelope = build_automation_tests(
+        lambda: connection,
+        prefix="Failstate.Phase1",
+        limit=50,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "list_automation_tests"
+    assert envelope["data"]["tests"][0]["full_test_path"] == "Failstate.Phase1.Weapon.IntervalMath"
+    assert connection.calls == [
+        (
+            "list_automation_tests",
+            {
+                "prefix": "Failstate.Phase1",
+                "limit": 50,
+            },
+        )
+    ]
+
+
+def test_build_automation_tests_clamps_limit():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "tests": [],
+                "truncated": False,
+            },
+        }
+    )
+
+    envelope = build_automation_tests(lambda: connection, limit=5000)
+
+    assert envelope["ok"] is True
+    assert connection.calls == [("list_automation_tests", {"limit": 1000})]
+
+
+def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "test": {
+                    "full_test_path": "UEMCP.Observability.Smoke",
+                    "test_name": "UEMCP.Observability.Smoke",
+                },
+                "status": "passed",
+                "successful": True,
+                "error_count": 0,
+            },
+        }
+    )
+
+    envelope = build_automation_test_run(
+        lambda: connection,
+        test_name="UEMCP.Observability.Smoke",
+        timeout_seconds=15,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "run_automation_test"
+    assert envelope["data"]["status"] == "passed"
+    assert connection.calls == [
+        (
+            "run_automation_test",
+            {
+                "test_name": "UEMCP.Observability.Smoke",
+                "timeout_seconds": 15.0,
             },
         )
     ]

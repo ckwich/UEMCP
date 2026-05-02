@@ -136,6 +136,8 @@ import sys
 from pathlib import Path
 
 from tools.observability_tools import (
+    build_automation_test_run,
+    build_automation_tests,
     build_editor_status,
     build_failstate_context,
     build_output_log,
@@ -147,6 +149,9 @@ def normalize_path(value: str) -> str:
     return Path(value).resolve().as_posix().lower()
 
 
+expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
+is_failstate_project = "/failstate/" in expected_project or expected_project.endswith("/failstate.uproject")
+
 checks = [
     ("uemcp_ping", build_uemcp_ping()),
     ("get_editor_status", build_editor_status()),
@@ -156,7 +161,24 @@ checks = [
         build_output_log(limit=10, category="LogTemp", contains="get_output_log"),
     ),
     ("get_failstate_context", build_failstate_context()),
+    ("list_uemcp_automation_tests", build_automation_tests(prefix="UEMCP.", limit=20)),
+    (
+        "run_uemcp_automation_smoke",
+        build_automation_test_run(
+            test_name="UEMCP.Observability.Smoke",
+            timeout_seconds=30,
+        ),
+    ),
 ]
+
+if is_failstate_project:
+    checks.append(
+        (
+            "list_failstate_automation_tests",
+            build_automation_tests(prefix="Failstate.Phase1", limit=20),
+        )
+    )
+
 check_results = {name: result for name, result in checks}
 
 failures = []
@@ -164,7 +186,6 @@ for name, result in checks:
     if not result.get("ok"):
         failures.append(f"{name} failed: {result.get('error')}")
 
-expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
 status = dict(check_results["get_editor_status"].get("data") or {})
 actual_project = normalize_path(status.get("project_path", ""))
 if actual_project != expected_project:
@@ -201,6 +222,28 @@ for entry in output_log_entries + filtered_entries:
     if "MCPServerRunnable: Sending response:" in message:
         failures.append("MCPServerRunnable is logging full response payloads into the output log")
         break
+
+uemcp_tests = dict(check_results["list_uemcp_automation_tests"].get("data") or {})
+uemcp_test_paths = {
+    str(test.get("full_test_path") or test.get("test_name") or "")
+    for test in uemcp_tests.get("tests") or []
+}
+if "UEMCP.Observability.Smoke" not in uemcp_test_paths:
+    failures.append("list_automation_tests did not return UEMCP.Observability.Smoke")
+
+smoke_run = dict(check_results["run_uemcp_automation_smoke"].get("data") or {})
+if smoke_run.get("status") != "passed" or smoke_run.get("successful") is not True:
+    failures.append(f"run_automation_test did not pass UEMCP.Observability.Smoke: {smoke_run}")
+
+if is_failstate_project:
+    failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
+    returned_failstate_tests = failstate_tests.get("tests") or []
+    if not returned_failstate_tests:
+        failures.append("list_automation_tests returned no Failstate.Phase1 tests")
+    for test in returned_failstate_tests:
+        full_test_path = str(test.get("full_test_path") or test.get("test_name") or "")
+        if not full_test_path.startswith("Failstate.Phase1"):
+            failures.append(f"Failstate automation query returned outside-prefix test {full_test_path!r}")
 
 summary = {
     "ok": not failures,

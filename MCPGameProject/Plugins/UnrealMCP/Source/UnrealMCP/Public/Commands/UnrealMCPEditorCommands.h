@@ -19,6 +19,8 @@ private:
     // Read-only observability commands
     TSharedPtr<FJsonObject> HandleGetEditorStatus(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetOutputLog(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params);
 
     // Actor manipulation commands
     TSharedPtr<FJsonObject> HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params);

@@ -52,6 +52,50 @@ The response includes:
 
 Each entry includes `sequence`, `time_seconds`, `timestamp_utc`, `category`, `verbosity`, and `message`.
 
+## list_automation_tests
+
+Lists Unreal automation tests currently visible to the editor automation framework. The bridge calls `FAutomationTestFramework::LoadTestModules()` and `GetValidTestNames()` on the game thread, then returns a bounded, prefix-filtered result.
+
+Parameters:
+
+- `prefix`: optional dot-path prefix filter. Matching checks both `full_test_path` and Unreal's runnable `test_name`.
+- `limit`: maximum tests, clamped from 1 to 1000.
+
+The response includes:
+
+- `tests`: matching tests, bounded by `limit`.
+- `total_valid_test_count`: all valid tests reported by Unreal before filtering.
+- `matched_test_count`: number of tests matching `prefix` before `limit`.
+- `returned_test_count`: number of tests returned.
+- `truncated`: true when more matching tests exist than were returned.
+- `filters`: the normalized query.
+
+Each test includes `display_name`, `full_test_path`, `test_name`, `tags`, `test_parameter`, `source_file`, `source_line`, `asset_path`, `open_command`, `flags`, and `participants_required`.
+
+For Failstate, the current profile prefix is `Failstate.Phase1`.
+
+## run_automation_test
+
+Runs one exact Unreal automation test and returns structured execution evidence. The command accepts either the listed `full_test_path` or `test_name`; internally the bridge resolves the test through `GetValidTestNames()` and runs the framework command name.
+
+Parameters:
+
+- `test_name`: exact `full_test_path` or `test_name` from `list_automation_tests`.
+- `timeout_seconds`: maximum latent-command drain time, clamped from 1 to 120 seconds.
+
+The response includes:
+
+- `test`: the resolved automation test metadata.
+- `status`: `passed`, `failed`, or `timed_out`.
+- `successful`: true only when the framework reports success and the timeout was not hit.
+- `timed_out`: true when the latent-command drain exceeded `timeout_seconds`.
+- `duration_seconds` and `reported_duration_seconds`.
+- `error_count`, `warning_count`, `event_count`, `events_truncated`, and bounded `events`.
+
+The bridge refuses to start automation tests while an editor slow task or Play In Editor session is active. This avoids Unreal's `StopTest()` assertion path and makes the failed gate explicit.
+
+The plugin ships a deterministic smoke test named `UEMCP.Observability.Smoke`; the live smoke script lists and runs it before reporting success.
+
 ## get_failstate_context
 
 Returns the active Failstate profile without touching Unreal state. The default profile targets:
@@ -72,6 +116,8 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 
 The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
+The script also requires `list_automation_tests(prefix="UEMCP.")` to return `UEMCP.Observability.Smoke` and `run_automation_test("UEMCP.Observability.Smoke")` to pass with zero errors.
+
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 
 ```powershell
@@ -80,5 +126,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
   -CloseLaunchedEditor
 ```
+
+When the target project path contains Failstate, the script additionally requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

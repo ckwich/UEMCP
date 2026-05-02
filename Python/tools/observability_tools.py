@@ -83,6 +83,43 @@ def build_output_log(
     )
 
 
+def build_automation_tests(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    prefix: Optional[str] = None,
+    limit: int = 200,
+) -> Dict[str, Any]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    params: Dict[str, Any] = {"limit": bounded_limit}
+    if prefix:
+        params["prefix"] = prefix
+
+    return execute_bridge_command(
+        tool="list_automation_tests",
+        command="list_automation_tests",
+        connection_factory=connection_factory,
+        params=params,
+    )
+
+
+def build_automation_test_run(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    test_name: str,
+    timeout_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    bounded_timeout_seconds = max(1.0, min(float(timeout_seconds), 120.0))
+    return execute_bridge_command(
+        tool="run_automation_test",
+        command="run_automation_test",
+        connection_factory=connection_factory,
+        params={
+            "test_name": test_name,
+            "timeout_seconds": bounded_timeout_seconds,
+        },
+    )
+
+
 def build_failstate_context(profile_name: str = "failstate") -> Dict[str, Any]:
     started_at = utc_now()
     context = get_failstate_context_data(profile_name)
@@ -121,6 +158,27 @@ def register_observability_tools(mcp: FastMCP):
             category=category,
             verbosity=verbosity,
             contains=contains,
+        )
+
+    @mcp.tool()
+    def list_automation_tests(
+        ctx: Context,
+        prefix: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """List Unreal automation tests by optional dot-path prefix."""
+        return build_automation_tests(prefix=prefix, limit=limit)
+
+    @mcp.tool()
+    def run_automation_test(
+        ctx: Context,
+        test_name: str,
+        timeout_seconds: float = 30.0,
+    ) -> Dict[str, Any]:
+        """Run one exact Unreal automation test and return structured results."""
+        return build_automation_test_run(
+            test_name=test_name,
+            timeout_seconds=timeout_seconds,
         )
 
     @mcp.tool()
