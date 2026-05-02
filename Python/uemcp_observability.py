@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from uuid import uuid4
 
 UEMCP_SERVER_NAME = "UEMCP"
 UEMCP_VERSION = "0.1.0"
 DEFAULT_PROFILE = "failstate"
+PROFILE_DIR_ENV_VAR = "UEMCP_PROFILE_DIR"
 
 
 def utc_now() -> datetime:
@@ -163,21 +165,95 @@ def execute_bridge_command(
         )
 
 
-def _profile_path(profile_name: str) -> Path:
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _packaged_profile_path(profile_name: str) -> Path:
     return Path(__file__).resolve().parent / "profiles" / f"{profile_name}.json"
 
 
-def load_profile(profile_name: str = DEFAULT_PROFILE) -> Dict[str, Any]:
-    path = _profile_path(profile_name)
+def _local_profile_path(profile_name: str) -> Path:
+    return _repo_root() / ".uemcp.local" / "profiles" / f"{profile_name}.json"
+
+
+def profile_search_paths(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> List[Dict[str, str]]:
+    candidates: List[Dict[str, str]] = []
+    if include_local:
+        environment_profile_dir = os.environ.get(PROFILE_DIR_ENV_VAR)
+        if environment_profile_dir:
+            candidates.append(
+                {
+                    "kind": "environment",
+                    "path": str(Path(environment_profile_dir) / f"{profile_name}.json"),
+                }
+            )
+        candidates.append(
+            {
+                "kind": "local",
+                "path": str(_local_profile_path(profile_name)),
+            }
+        )
+    candidates.append(
+        {
+            "kind": "packaged",
+            "path": str(_packaged_profile_path(profile_name)),
+        }
+    )
+    return candidates
+
+
+def resolve_profile_source(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> Dict[str, str]:
+    candidates = profile_search_paths(profile_name, include_local=include_local)
+    for candidate in candidates:
+        if Path(candidate["path"]).exists():
+            return candidate
+    searched_paths = ", ".join(candidate["path"] for candidate in candidates)
+    raise FileNotFoundError(f"Profile {profile_name!r} was not found. Searched: {searched_paths}")
+
+
+def _read_profile(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    source = resolve_profile_source(profile_name, include_local=include_local)
+    path = Path(source["path"])
     with path.open("r", encoding="utf-8") as profile_file:
         profile = json.load(profile_file)
     profile.setdefault("name", profile_name)
+    return profile, source
+
+
+def load_profile(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> Dict[str, Any]:
+    profile, _source = _read_profile(profile_name, include_local=include_local)
     return profile
 
 
-def get_failstate_context_data(profile_name: str = DEFAULT_PROFILE) -> Dict[str, Any]:
-    profile = load_profile(profile_name)
+def get_failstate_context_data(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> Dict[str, Any]:
+    profile, profile_source = _read_profile(profile_name, include_local=include_local)
     warnings: List[str] = []
+    if profile_source["kind"] == "packaged":
+        warnings.append(
+            "Using packaged shareable profile defaults; create .uemcp.local/profiles/"
+            f"{profile_name}.json or set {PROFILE_DIR_ENV_VAR} for local project paths."
+        )
 
     project_path = Path(profile["project_path"])
     worktree_path = Path(profile["preferred_worktree_path"])
@@ -191,6 +267,7 @@ def get_failstate_context_data(profile_name: str = DEFAULT_PROFILE) -> Dict[str,
     return {
         "active_profile": profile_name,
         "profile": profile,
+        "profile_source": profile_source,
         "read_only": True,
         "warnings": warnings,
     }
