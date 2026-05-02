@@ -110,6 +110,23 @@ def _automation_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _compact_readiness_result(readiness_envelope: Dict[str, Any]) -> Dict[str, Any]:
+    readiness_data = dict(readiness_envelope.get("data") or {})
+    return {
+        "readiness_request_id": readiness_envelope.get("request_id"),
+        "ready": bool(readiness_data.get("ready", False)),
+        "state": readiness_data.get("state"),
+        "blocking_reasons": list(readiness_data.get("blocking_reasons") or []),
+        "latest_status": dict(readiness_data.get("latest_status") or {}),
+        "samples": list(readiness_data.get("samples") or []),
+        "total_sample_count": readiness_data.get("total_sample_count"),
+        "stable_samples_required": readiness_data.get("stable_samples_required"),
+        "ready_settle_seconds": readiness_data.get("ready_settle_seconds"),
+        "timeout_seconds": readiness_data.get("timeout_seconds"),
+        "poll_interval_seconds": readiness_data.get("poll_interval_seconds"),
+    }
+
+
 def _readiness_reasons(status_data: Dict[str, Any]) -> List[str]:
     reasons: List[str] = []
     if status_data.get("is_slow_task_active"):
@@ -326,6 +343,11 @@ def build_profile_automation_run(
     limit: int = 10,
     timeout_seconds: float = 30.0,
     output_log_limit: int = 25,
+    require_ready: bool = True,
+    readiness_timeout_seconds: float = 0.0,
+    readiness_stable_samples: int = 1,
+    readiness_poll_interval_seconds: float = 1.0,
+    readiness_settle_seconds: float = 0.0,
 ) -> Dict[str, Any]:
     started_at = utc_now()
     context = get_failstate_context_data(profile_name)
@@ -346,6 +368,32 @@ def build_profile_automation_run(
             category="invalid_params",
             warnings=warnings,
         )
+
+    readiness = None
+    if require_ready:
+        readiness_envelope = build_editor_readiness(
+            connection_factory,
+            timeout_seconds=readiness_timeout_seconds,
+            stable_samples=readiness_stable_samples,
+            poll_interval_seconds=readiness_poll_interval_seconds,
+            settle_seconds=readiness_settle_seconds,
+        )
+        readiness = _compact_readiness_result(readiness_envelope)
+        if not readiness["ready"]:
+            blocking_reasons = readiness["blocking_reasons"] or ["editor_status_unavailable"]
+            return build_error_envelope(
+                tool="run_profile_automation_tests",
+                started_at=started_at,
+                message=(
+                    "Editor is not ready for automation: "
+                    + ", ".join(str(reason) for reason in blocking_reasons)
+                ),
+                category="editor_busy",
+                raw=readiness,
+                warnings=warnings + list(readiness_envelope.get("warnings") or []),
+                editor=_editor_identity(readiness["latest_status"]),
+            )
+        warnings.extend(readiness_envelope.get("warnings") or [])
 
     discovery = None
     tests_to_run: List[Dict[str, Any]]
@@ -425,11 +473,13 @@ def build_profile_automation_run(
         "requested_test_name": test_name,
         "limit": bounded_limit if mode == "prefix" else None,
         "timeout_seconds": bounded_timeout_seconds,
+        "readiness": readiness,
         "summary": _automation_summary(results),
         "tests": results,
         "discovery": discovery,
         "output_log_tail": output_log_tail,
         "evidence_refs": {
+            "readiness_request_id": readiness["readiness_request_id"] if readiness else None,
             "discovery_request_id": discovery["request_id"] if discovery else None,
             "run_request_ids": run_request_ids,
             "output_log_request_id": output_log_request_id,
@@ -530,6 +580,11 @@ def register_observability_tools(mcp: FastMCP):
         limit: int = 10,
         timeout_seconds: float = 30.0,
         output_log_limit: int = 25,
+        require_ready: bool = True,
+        readiness_timeout_seconds: float = 0.0,
+        readiness_stable_samples: int = 1,
+        readiness_poll_interval_seconds: float = 1.0,
+        readiness_settle_seconds: float = 0.0,
     ) -> Dict[str, Any]:
         """Run one automation test or a bounded profile prefix batch with a compact summary."""
         return build_profile_automation_run(
@@ -539,6 +594,11 @@ def register_observability_tools(mcp: FastMCP):
             limit=limit,
             timeout_seconds=timeout_seconds,
             output_log_limit=output_log_limit,
+            require_ready=require_ready,
+            readiness_timeout_seconds=readiness_timeout_seconds,
+            readiness_stable_samples=readiness_stable_samples,
+            readiness_poll_interval_seconds=readiness_poll_interval_seconds,
+            readiness_settle_seconds=readiness_settle_seconds,
         )
 
     @mcp.tool()

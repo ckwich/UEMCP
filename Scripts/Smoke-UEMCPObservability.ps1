@@ -191,17 +191,14 @@ checks.append(
 )
 checks.append(
     (
-        "get_editor_readiness_before_profile_uemcp_run",
-        build_editor_readiness(timeout_seconds=60, stable_samples=2),
-    )
-)
-checks.append(
-    (
         "run_profile_automation_uemcp_smoke",
         build_profile_automation_run(
             test_name="UEMCP.Observability.Smoke",
             timeout_seconds=30,
             output_log_limit=5,
+            require_ready=True,
+            readiness_timeout_seconds=60,
+            readiness_stable_samples=2,
         ),
     )
 )
@@ -221,12 +218,6 @@ if is_failstate_project:
     )
     checks.append(
         (
-            "get_editor_readiness_before_failstate_profile_run",
-            build_editor_readiness(timeout_seconds=60, stable_samples=2),
-        )
-    )
-    checks.append(
-        (
             "run_profile_automation_failstate_prefix",
             build_profile_automation_run(
                 profile_name="failstate",
@@ -234,6 +225,9 @@ if is_failstate_project:
                 limit=10,
                 timeout_seconds=30,
                 output_log_limit=10,
+                require_ready=True,
+                readiness_timeout_seconds=60,
+                readiness_stable_samples=2,
             ),
         )
     )
@@ -300,8 +294,16 @@ if smoke_run.get("status") != "passed" or smoke_run.get("successful") is not Tru
 
 profile_smoke_run = dict(check_results["run_profile_automation_uemcp_smoke"].get("data") or {})
 profile_smoke_summary = dict(profile_smoke_run.get("summary") or {})
+profile_smoke_readiness = dict(profile_smoke_run.get("readiness") or {})
 if profile_smoke_run.get("mode") != "single":
     failures.append(f"run_profile_automation_tests did not use single mode: {profile_smoke_run}")
+if profile_smoke_readiness.get("ready") is not True:
+    failures.append(
+        "run_profile_automation_tests did not gate UEMCP smoke on editor readiness: "
+        f"{profile_smoke_run}"
+    )
+if not (profile_smoke_run.get("evidence_refs") or {}).get("readiness_request_id"):
+    failures.append("run_profile_automation_tests did not return UEMCP readiness evidence")
 if profile_smoke_summary.get("total") != 1 or profile_smoke_summary.get("successful") is not True:
     failures.append(
         "run_profile_automation_tests did not pass UEMCP.Observability.Smoke: "
@@ -324,10 +326,18 @@ if is_failstate_project:
         check_results["run_profile_automation_failstate_prefix"].get("data") or {}
     )
     failstate_profile_summary = dict(failstate_profile_run.get("summary") or {})
+    failstate_profile_readiness = dict(failstate_profile_run.get("readiness") or {})
     if failstate_profile_run.get("mode") != "prefix":
         failures.append(
             f"run_profile_automation_tests did not use Failstate prefix mode: {failstate_profile_run}"
         )
+    if failstate_profile_readiness.get("ready") is not True:
+        failures.append(
+            "run_profile_automation_tests did not gate Failstate prefix on editor readiness: "
+            f"{failstate_profile_run}"
+        )
+    if not (failstate_profile_run.get("evidence_refs") or {}).get("readiness_request_id"):
+        failures.append("run_profile_automation_tests did not return Failstate readiness evidence")
     if failstate_profile_run.get("prefix") != "Failstate.Phase1":
         failures.append(
             "run_profile_automation_tests used unexpected Failstate prefix: "

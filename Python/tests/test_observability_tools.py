@@ -383,9 +383,47 @@ def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
     ]
 
 
+def test_build_profile_automation_run_blocks_when_editor_is_not_ready():
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": True,
+                },
+            },
+        ]
+    )
+
+    envelope = build_profile_automation_run(
+        lambda: connection,
+        profile_name="failstate",
+        limit=2,
+        output_log_limit=0,
+    )
+
+    assert envelope["ok"] is False
+    assert envelope["tool"] == "run_profile_automation_tests"
+    assert envelope["error"]["category"] == "editor_busy"
+    assert "not ready" in envelope["error"]["message"].lower()
+    assert envelope["error"]["raw"]["blocking_reasons"] == ["editor_slow_task_active"]
+    assert envelope["error"]["raw"]["readiness_request_id"].startswith("get_editor_readiness-")
+    assert connection.calls == [("get_editor_status", {})]
+
+
 def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary_and_log_tail():
     connection = SequenceUnrealConnection(
         [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
             {
                 "status": "success",
                 "result": {
@@ -463,6 +501,10 @@ def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary
 
     assert envelope["ok"] is True
     assert envelope["tool"] == "run_profile_automation_tests"
+    assert envelope["data"]["readiness"]["ready"] is True
+    assert envelope["data"]["evidence_refs"]["readiness_request_id"].startswith(
+        "get_editor_readiness-"
+    )
     assert envelope["data"]["mode"] == "prefix"
     assert envelope["data"]["prefix"] == "Failstate.Phase1"
     assert envelope["data"]["summary"] == {
@@ -486,6 +528,7 @@ def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary
         {"category": "LogAutomationTest", "message": "Missing asset"}
     ]
     assert connection.calls == [
+        ("get_editor_status", {}),
         ("list_automation_tests", {"limit": 2, "prefix": "Failstate.Phase1"}),
         (
             "run_automation_test",
@@ -508,6 +551,14 @@ def test_build_profile_automation_run_executes_profile_prefix_batch_with_summary
 def test_build_profile_automation_run_executes_one_exact_test_without_discovery():
     connection = SequenceUnrealConnection(
         [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
             {
                 "status": "success",
                 "result": {
@@ -543,10 +594,12 @@ def test_build_profile_automation_run_executes_one_exact_test_without_discovery(
 
     assert envelope["ok"] is True
     assert envelope["data"]["mode"] == "single"
+    assert envelope["data"]["readiness"]["ready"] is True
     assert envelope["data"]["requested_test_name"] == "UEMCP.Observability.Smoke"
     assert envelope["data"]["discovery"] is None
     assert envelope["data"]["summary"]["successful"] is True
     assert connection.calls == [
+        ("get_editor_status", {}),
         (
             "run_automation_test",
             {
