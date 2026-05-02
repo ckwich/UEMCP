@@ -51,3 +51,13 @@ Returns the active Failstate profile without touching Unreal state. The default 
 - UE 5.7
 - `Content/Failstate/Blueprints/Blockout`
 - `Failstate.Phase1` automation tests
+
+## Live Smoke Gate
+
+Use the repo smoke script to prove the editor-target build, bridge listener, and read-only observability tools against a running Unreal Editor:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
+```
+
+The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true` or if `get_editor_status.project_path` does not match the sample project.

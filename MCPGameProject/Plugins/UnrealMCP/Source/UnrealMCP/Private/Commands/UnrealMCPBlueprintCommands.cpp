@@ -24,7 +24,7 @@
 
 namespace
 {
-    UClass* FindLoadedClassByName(const FString& ClassName)
+    UClass* FindLoadedComponentClassByName(const FString& ClassName)
     {
         return FindFirstObject<UClass>(
             *ClassName,
@@ -208,26 +208,26 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAddComponentToBluepri
     UClass* ComponentClass = nullptr;
 
     // Try to find the class with exact name first
-    ComponentClass = FindLoadedClassByName(ComponentType);
+    ComponentClass = FindLoadedComponentClassByName(ComponentType);
     
     // If not found, try with "Component" suffix
     if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
     {
         FString ComponentTypeWithSuffix = ComponentType + TEXT("Component");
-        ComponentClass = FindLoadedClassByName(ComponentTypeWithSuffix);
+        ComponentClass = FindLoadedComponentClassByName(ComponentTypeWithSuffix);
     }
     
     // If still not found, try with "U" prefix
     if (!ComponentClass && !ComponentType.StartsWith(TEXT("U")))
     {
         FString ComponentTypeWithPrefix = TEXT("U") + ComponentType;
-        ComponentClass = FindLoadedClassByName(ComponentTypeWithPrefix);
+        ComponentClass = FindLoadedComponentClassByName(ComponentTypeWithPrefix);
         
         // Try with both prefix and suffix
         if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
         {
             FString ComponentTypeWithBoth = TEXT("U") + ComponentType + TEXT("Component");
-            ComponentClass = FindLoadedClassByName(ComponentTypeWithBoth);
+            ComponentClass = FindLoadedComponentClassByName(ComponentTypeWithBoth);
         }
     }
     

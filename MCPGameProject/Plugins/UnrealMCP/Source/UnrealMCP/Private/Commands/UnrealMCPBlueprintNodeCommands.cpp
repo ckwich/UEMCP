@@ -23,7 +23,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogUnrealMCP, Log, All);
 
 namespace
 {
-    UClass* FindLoadedClassByName(const FString& ClassName)
+    UClass* FindLoadedBlueprintNodeClassByName(const FString& ClassName)
     {
         return FindFirstObject<UClass>(
             *ClassName,
@@ -33,7 +33,7 @@ namespace
         );
     }
 
-    UClass* FindLoadedClassByName(const TCHAR* ClassName)
+    UClass* FindLoadedBlueprintNodeClassByName(const TCHAR* ClassName)
     {
         return FindFirstObject<UClass>(
             ClassName,
@@ -344,7 +344,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         UClass* TargetClass = nullptr;
         
         // First try without a prefix
-        TargetClass = FindLoadedClassByName(Target);
+        TargetClass = FindLoadedBlueprintNodeClassByName(Target);
         UE_LOG(LogTemp, Display, TEXT("Tried to find class '%s': %s"), 
                *Target, TargetClass ? TEXT("Found") : TEXT("Not found"));
         
@@ -352,7 +352,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         if (!TargetClass && !Target.StartsWith(TEXT("U")))
         {
             FString TargetWithPrefix = FString(TEXT("U")) + Target;
-            TargetClass = FindLoadedClassByName(TargetWithPrefix);
+            TargetClass = FindLoadedBlueprintNodeClassByName(TargetWithPrefix);
             UE_LOG(LogTemp, Display, TEXT("Tried to find class '%s': %s"), 
                    *TargetWithPrefix, TargetClass ? TEXT("Found") : TEXT("Not found"));
         }
@@ -367,7 +367,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
             
             for (const FString& ClassName : PossibleClassNames)
             {
-                TargetClass = FindLoadedClassByName(ClassName);
+                TargetClass = FindLoadedBlueprintNodeClassByName(ClassName);
                 if (TargetClass)
                 {
                     UE_LOG(LogTemp, Display, TEXT("Found class using alternative name '%s'"), *ClassName);
@@ -380,7 +380,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
         if (!TargetClass && Target == TEXT("UGameplayStatics"))
         {
             // For UGameplayStatics, use a direct reference to known class
-            TargetClass = FindLoadedClassByName(TEXT("UGameplayStatics"));
+            TargetClass = FindLoadedBlueprintNodeClassByName(TEXT("UGameplayStatics"));
             if (!TargetClass)
             {
                 // Try loading it from its known package
@@ -527,7 +527,7 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleAddBlueprintFunct
                             const FString& ClassName = StringVal;
                             
                             // TODO: This likely won't work in UE5.5+, so don't rely on it.
-                            UClass* Class = FindLoadedClassByName(ClassName);
+                            UClass* Class = FindLoadedBlueprintNodeClassByName(ClassName);
 
                             if (!Class)
                             {
