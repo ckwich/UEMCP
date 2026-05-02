@@ -133,12 +133,12 @@ try {
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 from tools.observability_tools import (
     build_automation_test_run,
     build_automation_tests,
+    build_editor_readiness,
     build_editor_status,
     build_failstate_context,
     build_output_log,
@@ -154,51 +154,6 @@ def normalize_path(value: str) -> str:
 expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
 is_failstate_project = "/failstate/" in expected_project or expected_project.endswith("/failstate.uproject")
 
-def wait_for_editor_idle(label: str, timeout_seconds: float = 60.0):
-    deadline = time.monotonic() + timeout_seconds
-    idle_samples = 0
-    samples = []
-
-    while time.monotonic() < deadline:
-        result = build_editor_status()
-        data = dict(result.get("data") or {})
-        samples.append(
-            {
-                "ok": result.get("ok"),
-                "is_slow_task_active": data.get("is_slow_task_active"),
-                "is_pie_running": data.get("is_pie_running"),
-                "current_map": data.get("current_map"),
-            }
-        )
-        samples = samples[-5:]
-
-        if result.get("ok") and not data.get("is_slow_task_active") and not data.get("is_pie_running"):
-            idle_samples += 1
-            if idle_samples >= 2:
-                return {
-                    "ok": True,
-                    "tool": "wait_for_editor_idle",
-                    "data": {"label": label, "samples": samples},
-                    "warnings": [],
-                    "error": None,
-                }
-        else:
-            idle_samples = 0
-
-        time.sleep(1.0)
-
-    return {
-        "ok": False,
-        "tool": "wait_for_editor_idle",
-        "data": {"label": label, "samples": samples},
-        "warnings": [],
-        "error": {
-            "category": "editor_busy",
-            "message": f"Timed out waiting for editor idle before {label}",
-            "raw": samples,
-        },
-    }
-
 
 checks = []
 
@@ -212,9 +167,19 @@ checks.append(
     )
 )
 checks.append(("get_failstate_context", build_failstate_context()))
-checks.append(("wait_editor_idle_before_discovery", wait_for_editor_idle("automation discovery")))
+checks.append(
+    (
+        "get_editor_readiness_before_discovery",
+        build_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20),
+    )
+)
 checks.append(("list_uemcp_automation_tests", build_automation_tests(prefix="UEMCP.", limit=20)))
-checks.append(("wait_editor_idle_before_uemcp_run", wait_for_editor_idle("UEMCP smoke run")))
+checks.append(
+    (
+        "get_editor_readiness_before_uemcp_run",
+        build_editor_readiness(timeout_seconds=60, stable_samples=2),
+    )
+)
 checks.append(
     (
         "run_uemcp_automation_smoke",
@@ -224,7 +189,12 @@ checks.append(
         ),
     )
 )
-checks.append(("wait_editor_idle_before_profile_uemcp_run", wait_for_editor_idle("profile UEMCP smoke run")))
+checks.append(
+    (
+        "get_editor_readiness_before_profile_uemcp_run",
+        build_editor_readiness(timeout_seconds=60, stable_samples=2),
+    )
+)
 checks.append(
     (
         "run_profile_automation_uemcp_smoke",
@@ -237,7 +207,12 @@ checks.append(
 )
 
 if is_failstate_project:
-    checks.append(("wait_editor_idle_before_failstate_discovery", wait_for_editor_idle("Failstate discovery")))
+    checks.append(
+        (
+            "get_editor_readiness_before_failstate_discovery",
+            build_editor_readiness(timeout_seconds=60, stable_samples=2),
+        )
+    )
     checks.append(
         (
             "list_failstate_automation_tests",
@@ -246,8 +221,8 @@ if is_failstate_project:
     )
     checks.append(
         (
-            "wait_editor_idle_before_failstate_profile_run",
-            wait_for_editor_idle("Failstate profile automation run"),
+            "get_editor_readiness_before_failstate_profile_run",
+            build_editor_readiness(timeout_seconds=60, stable_samples=2),
         )
     )
     checks.append(
@@ -269,6 +244,10 @@ failures = []
 for name, result in checks:
     if not result.get("ok"):
         failures.append(f"{name} failed: {result.get('error')}")
+    if name.startswith("get_editor_readiness"):
+        readiness = dict(result.get("data") or {})
+        if readiness.get("ready") is not True:
+            failures.append(f"{name} did not report ready editor state: {readiness}")
 
 status = dict(check_results["get_editor_status"].get("data") or {})
 actual_project = normalize_path(status.get("project_path", ""))

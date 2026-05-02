@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -20,6 +21,7 @@ logger = logging.getLogger("UnrealMCP")
 
 MAX_PROFILE_AUTOMATION_RUNS = 50
 MAX_EVENT_SNIPPETS = 5
+MAX_READINESS_SAMPLES = 5
 
 
 def _default_connection_factory():
@@ -108,6 +110,42 @@ def _automation_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _readiness_reasons(status_data: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    if status_data.get("is_slow_task_active"):
+        reasons.append("editor_slow_task_active")
+    if status_data.get("is_pie_running"):
+        reasons.append("play_in_editor_running")
+    return reasons
+
+
+def _readiness_sample(status_envelope: Dict[str, Any]) -> Dict[str, Any]:
+    if not status_envelope.get("ok"):
+        return {
+            "ok": False,
+            "ready": False,
+            "request_id": status_envelope.get("request_id"),
+            "current_map": None,
+            "is_pie_running": None,
+            "is_slow_task_active": None,
+            "blocking_reasons": ["editor_status_unavailable"],
+            "error": status_envelope.get("error"),
+        }
+
+    status_data = dict(status_envelope.get("data") or {})
+    reasons = _readiness_reasons(status_data)
+    return {
+        "ok": True,
+        "ready": not reasons,
+        "request_id": status_envelope.get("request_id"),
+        "current_map": status_data.get("current_map"),
+        "is_pie_running": bool(status_data.get("is_pie_running", False)),
+        "is_slow_task_active": bool(status_data.get("is_slow_task_active", False)),
+        "blocking_reasons": reasons,
+        "error": None,
+    }
+
+
 def build_uemcp_ping(
     connection_factory: Callable[[], Any] = _default_connection_factory,
 ) -> Dict[str, Any]:
@@ -131,6 +169,89 @@ def build_editor_status(
         command="get_editor_status",
         connection_factory=connection_factory,
         editor_builder=_editor_identity,
+    )
+
+
+def build_editor_readiness(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    timeout_seconds: float = 0.0,
+    stable_samples: int = 1,
+    poll_interval_seconds: float = 1.0,
+    settle_seconds: float = 0.0,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Dict[str, Any]:
+    started_at = utc_now()
+    bounded_timeout_seconds = max(0.0, min(float(timeout_seconds), 300.0))
+    bounded_stable_samples = max(1, min(int(stable_samples), 10))
+    bounded_poll_interval_seconds = max(0.0, min(float(poll_interval_seconds), 10.0))
+    bounded_settle_seconds = max(0.0, min(float(settle_seconds), 120.0))
+
+    deadline = monotonic() + bounded_timeout_seconds
+    consecutive_ready_samples = 0
+    ready_since_seconds: Optional[float] = None
+    total_sample_count = 0
+    samples: List[Dict[str, Any]] = []
+    latest_status: Dict[str, Any] = {}
+    latest_sample: Dict[str, Any] = {
+        "ready": False,
+        "blocking_reasons": ["editor_status_unavailable"],
+    }
+
+    while True:
+        status_envelope = build_editor_status(connection_factory)
+        now_seconds = monotonic()
+        latest_status = dict(status_envelope.get("data") or {})
+        latest_sample = _readiness_sample(status_envelope)
+        total_sample_count += 1
+        samples.append(latest_sample)
+        samples = samples[-MAX_READINESS_SAMPLES:]
+
+        if latest_sample["ready"]:
+            consecutive_ready_samples += 1
+            if ready_since_seconds is None:
+                ready_since_seconds = now_seconds
+            has_stable_samples = consecutive_ready_samples >= bounded_stable_samples
+            has_settled = (now_seconds - ready_since_seconds) >= bounded_settle_seconds
+            if has_stable_samples and has_settled:
+                state = "ready"
+                ready = True
+                break
+        else:
+            consecutive_ready_samples = 0
+            ready_since_seconds = None
+
+        if bounded_timeout_seconds == 0.0 or monotonic() >= deadline:
+            ready = False
+            state = "timeout" if bounded_timeout_seconds > 0.0 else "blocked"
+            break
+
+        sleep(bounded_poll_interval_seconds)
+
+    data = {
+        "ready": ready,
+        "state": state,
+        "blocking_reasons": list(latest_sample.get("blocking_reasons") or []),
+        "latest_status": latest_status,
+        "samples": samples,
+        "total_sample_count": total_sample_count,
+        "stable_samples_required": bounded_stable_samples,
+        "ready_settle_seconds": bounded_settle_seconds,
+        "timeout_seconds": bounded_timeout_seconds,
+        "poll_interval_seconds": bounded_poll_interval_seconds,
+    }
+
+    warnings = []
+    if state == "timeout":
+        warnings.append("Timed out waiting for editor readiness")
+
+    return build_success_envelope(
+        tool="get_editor_readiness",
+        started_at=started_at,
+        data=data,
+        warnings=warnings,
+        editor=_editor_identity(latest_status),
     )
 
 
@@ -346,6 +467,22 @@ def register_observability_tools(mcp: FastMCP):
     def get_editor_status(ctx: Context) -> Dict[str, Any]:
         """Return read-only Unreal Editor status and project identity."""
         return build_editor_status()
+
+    @mcp.tool()
+    def get_editor_readiness(
+        ctx: Context,
+        timeout_seconds: float = 0.0,
+        stable_samples: int = 1,
+        poll_interval_seconds: float = 1.0,
+        settle_seconds: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Return whether the editor is ready for automation, optionally waiting for idle samples."""
+        return build_editor_readiness(
+            timeout_seconds=timeout_seconds,
+            stable_samples=stable_samples,
+            poll_interval_seconds=poll_interval_seconds,
+            settle_seconds=settle_seconds,
+        )
 
     @mcp.tool()
     def get_output_log(

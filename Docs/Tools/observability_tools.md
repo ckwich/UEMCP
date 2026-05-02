@@ -30,6 +30,25 @@ Returns Unreal Editor identity and state:
 - Selected actor count.
 - Dirty package count.
 
+## get_editor_readiness
+
+Returns whether the editor is ready for automation, optionally waiting for consecutive ready samples. This is a read-only Python composition over `get_editor_status`; it does not add a new Unreal command.
+
+Parameters:
+
+- `timeout_seconds`: optional wait budget, clamped from 0 to 300 seconds. `0` takes a single snapshot.
+- `stable_samples`: number of consecutive ready samples required, clamped from 1 to 10.
+- `poll_interval_seconds`: delay between status samples when waiting, clamped from 0 to 10 seconds.
+- `settle_seconds`: optional duration the editor must remain ready after the first ready sample, clamped from 0 to 120 seconds.
+
+The response includes:
+
+- `ready`: true when the latest samples show no blocking editor state.
+- `state`: `ready`, `blocked`, or `timeout`.
+- `blocking_reasons`: currently `editor_slow_task_active`, `play_in_editor_running`, or `editor_status_unavailable`.
+- `latest_status`: the latest `get_editor_status` payload.
+- `samples`: the most recent bounded readiness samples, each including status request id, current map, PIE state, slow-task state, and blocking reasons.
+
 ## get_output_log
 
 Requests bounded output log data from the editor bridge. The Unreal plugin registers a thread-safe in-memory `GLog` output device during module startup and keeps the newest 2048 entries available for MCP queries.
@@ -141,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 
 The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
-The script also waits for two consecutive idle editor status samples before automation gates, then requires `list_automation_tests(prefix="UEMCP.")` to return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` to pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke")` to return a successful single-test summary plus output-log tail evidence.
+The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires shorter readiness checks before each automation run. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke")` must return a successful single-test summary plus output-log tail evidence.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 

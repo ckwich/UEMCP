@@ -2,6 +2,7 @@ from tools.observability_tools import (
     build_automation_test_run,
     build_automation_tests,
     build_editor_status,
+    build_editor_readiness,
     build_failstate_context,
     build_output_log,
     build_profile_automation_run,
@@ -29,6 +30,19 @@ class SequenceUnrealConnection:
         if not self.responses:
             raise AssertionError(f"Unexpected command: {command}")
         return self.responses.pop(0)
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
 def test_build_uemcp_ping_returns_ok_envelope_for_bridge_success():
@@ -79,6 +93,171 @@ def test_build_editor_status_unwraps_status_payload():
     assert envelope["data"]["project_path"] == "C:/Dev/Failstate"
     assert envelope["editor"]["project_path"] == "C:/Dev/Failstate"
     assert connection.calls == [("get_editor_status", {})]
+
+
+def test_build_editor_readiness_returns_ready_snapshot_without_waiting():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "project_path": "C:/Dev/Failstate",
+                "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+                "is_pie_running": False,
+                "is_slow_task_active": False,
+            },
+        }
+    )
+
+    envelope = build_editor_readiness(lambda: connection)
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "get_editor_readiness"
+    assert envelope["data"]["ready"] is True
+    assert envelope["data"]["state"] == "ready"
+    assert envelope["data"]["blocking_reasons"] == []
+    assert envelope["data"]["latest_status"]["current_map"] == "/Game/Failstate/Maps/L_CombatShell_P1"
+    assert envelope["data"]["samples"] == [
+        {
+            "ok": True,
+            "ready": True,
+            "request_id": envelope["data"]["samples"][0]["request_id"],
+            "current_map": "/Game/Failstate/Maps/L_CombatShell_P1",
+            "is_pie_running": False,
+            "is_slow_task_active": False,
+            "blocking_reasons": [],
+            "error": None,
+        }
+    ]
+    assert connection.calls == [("get_editor_status", {})]
+
+
+def test_build_editor_readiness_reports_busy_reasons_from_status():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "current_map": "/Temp/Untitled_1",
+                "is_pie_running": True,
+                "is_slow_task_active": True,
+            },
+        }
+    )
+
+    envelope = build_editor_readiness(lambda: connection)
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["ready"] is False
+    assert envelope["data"]["state"] == "blocked"
+    assert envelope["data"]["blocking_reasons"] == [
+        "editor_slow_task_active",
+        "play_in_editor_running",
+    ]
+
+
+def test_build_editor_readiness_waits_for_stable_ready_samples():
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": True,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+        ]
+    )
+
+    envelope = build_editor_readiness(
+        lambda: connection,
+        timeout_seconds=1,
+        stable_samples=2,
+        poll_interval_seconds=0,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["ready"] is True
+    assert envelope["data"]["state"] == "ready"
+    assert envelope["data"]["total_sample_count"] == 3
+    assert [sample["ready"] for sample in envelope["data"]["samples"]] == [False, True, True]
+    assert connection.calls == [
+        ("get_editor_status", {}),
+        ("get_editor_status", {}),
+        ("get_editor_status", {}),
+    ]
+
+
+def test_build_editor_readiness_requires_ready_settle_window():
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Temp/Untitled_1",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+        ]
+    )
+    clock = FakeClock()
+
+    envelope = build_editor_readiness(
+        lambda: connection,
+        timeout_seconds=10,
+        stable_samples=2,
+        poll_interval_seconds=1,
+        settle_seconds=3,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["ready"] is True
+    assert envelope["data"]["state"] == "ready"
+    assert envelope["data"]["ready_settle_seconds"] == 3.0
+    assert envelope["data"]["total_sample_count"] == 4
+    assert clock.sleeps == [1.0, 1.0, 1.0]
 
 
 def test_build_output_log_passes_bounded_filters_to_bridge():
