@@ -86,8 +86,7 @@ uint32 FMCPServerRunnable::Run()
                                 // Execute command
                                 FString Response = Bridge->ExecuteCommand(CommandType, JsonObject->GetObjectField(TEXT("params")));
                                 
-                                // Log response for debugging
-                                UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Sending response: %s"), *Response);
+                                UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Sending response for %s (%d chars)"), *CommandType, Response.Len());
                                 
                                 // Send response
                                 int32 BytesSent = 0;
@@ -312,7 +311,7 @@ void FMCPServerRunnable::ProcessMessage(TSharedPtr<FSocket> Client, const FStrin
     Response += TEXT("\n");
     int32 BytesSent = 0;
     
-    UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Sending response: %s"), *Response);
+    UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Sending response for %s (%d chars)"), *CommandType, Response.Len());
     
     if (!Client->Send((uint8*)TCHAR_TO_UTF8(*Response), Response.Len(), BytesSent))
     {

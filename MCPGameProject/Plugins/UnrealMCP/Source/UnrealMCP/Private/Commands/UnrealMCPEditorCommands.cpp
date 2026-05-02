@@ -1,5 +1,6 @@
 #include "Commands/UnrealMCPEditorCommands.h"
 #include "Commands/UnrealMCPCommonUtils.h"
+#include "Observability/UEMCPOutputLogCapture.h"
 #include "Editor.h"
 #include "EditorViewportClient.h"
 #include "LevelEditorViewport.h"
@@ -167,15 +168,34 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetOutputLog(const TShar
         FiltersObj->SetStringField(TEXT("contains"), Contains);
     }
 
+    FUEMCPOutputLogCapture& OutputLogCapture = FUEMCPOutputLogCapture::Get();
+    OutputLogCapture.Register();
+
+    TArray<FUEMCPOutputLogEntry> CapturedEntries;
+    const int32 MatchedEntryCount = OutputLogCapture.Query(Limit, Category, Verbosity, Contains, CapturedEntries);
+
     TArray<TSharedPtr<FJsonValue>> Entries;
+    Entries.Reserve(CapturedEntries.Num());
+    for (const FUEMCPOutputLogEntry& Entry : CapturedEntries)
+    {
+        TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
+        EntryObj->SetNumberField(TEXT("sequence"), static_cast<double>(Entry.Sequence));
+        EntryObj->SetNumberField(TEXT("time_seconds"), Entry.TimeSeconds);
+        EntryObj->SetStringField(TEXT("timestamp_utc"), Entry.TimestampUtc);
+        EntryObj->SetStringField(TEXT("category"), Entry.Category);
+        EntryObj->SetStringField(TEXT("verbosity"), Entry.Verbosity);
+        EntryObj->SetStringField(TEXT("message"), Entry.Message);
+        Entries.Add(MakeShared<FJsonValueObject>(EntryObj));
+    }
+
     TArray<TSharedPtr<FJsonValue>> Warnings;
-    Warnings.Add(MakeShared<FJsonValueString>(
-        TEXT("Historical output log capture is not wired yet; this command returns the bounded response shape only.")
-    ));
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetArrayField(TEXT("entries"), Entries);
-    ResultObj->SetBoolField(TEXT("truncated"), false);
+    ResultObj->SetBoolField(TEXT("truncated"), MatchedEntryCount > CapturedEntries.Num());
+    ResultObj->SetNumberField(TEXT("buffer_capacity"), OutputLogCapture.GetCapacity());
+    ResultObj->SetNumberField(TEXT("captured_entry_count"), OutputLogCapture.GetCapturedEntryCount());
+    ResultObj->SetNumberField(TEXT("matched_entry_count"), MatchedEntryCount);
     ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
     ResultObj->SetArrayField(TEXT("warnings"), Warnings);
 

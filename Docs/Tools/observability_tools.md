@@ -31,7 +31,7 @@ Returns Unreal Editor identity and state:
 
 ## get_output_log
 
-Requests bounded output log data from the editor bridge.
+Requests bounded output log data from the editor bridge. The Unreal plugin registers a thread-safe in-memory `GLog` output device during module startup and keeps the newest 2048 entries available for MCP queries.
 
 Parameters:
 
@@ -40,7 +40,17 @@ Parameters:
 - `verbosity`: optional verbosity filter.
 - `contains`: optional substring filter.
 
-The current Unreal-side implementation returns the stable response shape with an explicit warning that historical log capture is not fully wired yet.
+The response includes:
+
+- `entries`: matching log entries in chronological order, bounded by `limit`.
+- `truncated`: true when more matching entries exist than were returned.
+- `buffer_capacity`: current Unreal-side ring buffer capacity.
+- `captured_entry_count`: total entries currently retained in the ring buffer.
+- `matched_entry_count`: number of retained entries matching the requested filters before `limit` was applied.
+- `filters`: the normalized filters used by the bridge.
+- `warnings`: bounded non-fatal warnings.
+
+Each entry includes `sequence`, `time_seconds`, `timestamp_utc`, `category`, `verbosity`, and `message`.
 
 ## get_failstate_context
 
@@ -60,7 +70,7 @@ Use the repo smoke script to prove the editor-target build, bridge listener, and
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 ```
 
-The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true` or if `get_editor_status.project_path` does not match the sample project.
+The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `get_output_log` returns no live entries, or if category/substring filtering returns entries outside the requested filter.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 

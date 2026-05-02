@@ -151,8 +151,13 @@ checks = [
     ("uemcp_ping", build_uemcp_ping()),
     ("get_editor_status", build_editor_status()),
     ("get_output_log", build_output_log(limit=5)),
+    (
+        "get_output_log_filtered",
+        build_output_log(limit=10, category="LogTemp", contains="get_output_log"),
+    ),
     ("get_failstate_context", build_failstate_context()),
 ]
+check_results = {name: result for name, result in checks}
 
 failures = []
 for name, result in checks:
@@ -160,7 +165,7 @@ for name, result in checks:
         failures.append(f"{name} failed: {result.get('error')}")
 
 expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
-status = dict(checks[1][1].get("data") or {})
+status = dict(check_results["get_editor_status"].get("data") or {})
 actual_project = normalize_path(status.get("project_path", ""))
 if actual_project != expected_project:
     failures.append(
@@ -168,9 +173,38 @@ if actual_project != expected_project:
         f"{status.get('project_path')!r}, expected {expected_project!r}"
     )
 
+output_log = dict(check_results["get_output_log"].get("data") or {})
+output_log_entries = output_log.get("entries") or []
+if not output_log_entries:
+    failures.append("get_output_log returned no entries; expected live captured log entries")
+
+placeholder_warning = "Historical output log capture is not wired yet"
+for warning in output_log.get("warnings") or []:
+    if placeholder_warning in str(warning):
+        failures.append("get_output_log still reports placeholder historical capture warning")
+        break
+
+filtered_output_log = dict(check_results["get_output_log_filtered"].get("data") or {})
+filtered_entries = filtered_output_log.get("entries") or []
+if not filtered_entries:
+    failures.append("get_output_log filtered query returned no entries")
+for entry in filtered_entries:
+    category = str(entry.get("category", ""))
+    message = str(entry.get("message", ""))
+    if category.lower() != "logtemp":
+        failures.append(f"get_output_log filtered query returned category {category!r}")
+    if "get_output_log" not in message.lower():
+        failures.append("get_output_log filtered query returned an entry without the requested substring")
+
+for entry in output_log_entries + filtered_entries:
+    message = str(entry.get("message", ""))
+    if "MCPServerRunnable: Sending response:" in message:
+        failures.append("MCPServerRunnable is logging full response payloads into the output log")
+        break
+
 summary = {
     "ok": not failures,
-    "checks": {name: result for name, result in checks},
+    "checks": check_results,
     "expected_project": expected_project,
     "failures": failures,
 }
