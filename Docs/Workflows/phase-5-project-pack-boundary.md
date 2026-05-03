@@ -12,6 +12,7 @@ UEMCP owns generic Unreal observations and validation primitives. Consuming proj
 - Project-specific contracts live in the consuming project under `Tools/UEMCP`.
 - Local machine-only overrides can still live in ignored `.uemcp.local` files.
 - UEMCP scripts should prefer `UEMCP_PROFILE_DIR` and project-owned packs over repo-local private profiles.
+- UEMCP smoke scripts should execute project packs through `run_project_compatibility_gates`, not through project-name-specific branches.
 
 ## Project Pack Shape
 
@@ -28,6 +29,14 @@ Tools/
 ```
 
 The profile names content roots, automation prefixes, log categories, known maps, required UEMCP capabilities, and sentinel compatibility gates. The gate file names the project path, plugin path, and the exact smoke command for that project.
+
+`run_project_compatibility_gates` currently supports these profile-driven gate kinds:
+
+- `sentinel_asset_searches`: proves a content root resolves and named sentinel assets are discoverable.
+- `sentinel_blueprints`: proves a representative Blueprint resolves and reports expected class identity.
+- `automation_prefixes`: optionally overrides the top-level automation prefixes for compatibility validation.
+
+When `automation_prefixes` is omitted, the runner treats top-level `automation_test_prefixes` as compatibility gates.
 
 ## Failstate Current Pack
 
@@ -66,7 +75,7 @@ UEMCP sample smoke remains the public neutral gate:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
 ```
 
-Failstate pack smoke uses the project-owned profile directory:
+Failstate pack smoke uses the project-owned profile directory. The smoke auto-runs `run_project_compatibility_gates` whenever this mounted profile directory is present:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `

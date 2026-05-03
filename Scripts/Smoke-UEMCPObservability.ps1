@@ -112,10 +112,18 @@ if (-not $SkipBuild) {
 $LaunchedEditor = $null
 $PreviousProfileDir = $env:UEMCP_PROFILE_DIR
 $PreviousProfileName = $env:UEMCP_PROFILE_NAME
+$PreviousExpectedProfileSourceKind = $env:UEMCP_SMOKE_EXPECTED_PROFILE_SOURCE_KIND
+$PreviousRunCompatibilityGates = $env:UEMCP_SMOKE_RUN_COMPATIBILITY_GATES
 try {
     if ($ResolvedProfileDir) {
         Write-Output "Using UEMCP project profile directory: $ResolvedProfileDir"
         $env:UEMCP_PROFILE_DIR = $ResolvedProfileDir
+        $env:UEMCP_SMOKE_EXPECTED_PROFILE_SOURCE_KIND = "environment"
+        $env:UEMCP_SMOKE_RUN_COMPATIBILITY_GATES = "1"
+    }
+    else {
+        $env:UEMCP_SMOKE_EXPECTED_PROFILE_SOURCE_KIND = ""
+        $env:UEMCP_SMOKE_RUN_COMPATIBILITY_GATES = "0"
     }
     $env:UEMCP_PROFILE_NAME = $ProfileName
 
@@ -167,12 +175,9 @@ import sys
 from pathlib import Path
 
 from tools.observability_tools import (
-    build_asset_dependencies,
-    build_asset_referencers,
     build_asset_search,
     build_automation_test_run,
     build_automation_tests,
-    build_blueprint_query,
     build_editor_automation_readiness_diagnostic,
     build_editor_readiness,
     build_editor_status,
@@ -180,6 +185,7 @@ from tools.observability_tools import (
     build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
+    build_project_compatibility_gates,
     build_project_context,
     build_uemcp_ping,
 )
@@ -191,7 +197,8 @@ def normalize_path(value: str) -> str:
 
 expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
 profile_name = os.environ.get("UEMCP_PROFILE_NAME", "failstate")
-is_failstate_project = "/failstate/" in expected_project or expected_project.endswith("/failstate.uproject")
+expected_profile_source_kind = os.environ.get("UEMCP_SMOKE_EXPECTED_PROFILE_SOURCE_KIND", "")
+run_compatibility_gates = os.environ.get("UEMCP_SMOKE_RUN_COMPATIBILITY_GATES") == "1"
 
 
 checks = []
@@ -254,70 +261,12 @@ checks.append(
     )
 )
 
-if is_failstate_project:
-    failstate_blockout_cover_package = "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover"
+if run_compatibility_gates:
     checks.append(
         (
-            "asset_search_failstate_blockout",
-            build_asset_search(
-                root="Content/Failstate/Blueprints/Blockout",
-                name_contains="BP_FSBlockout",
-                limit=50,
-            ),
-        )
-    )
-    checks.append(
-        (
-            "asset_dependencies_failstate_blockout_cover",
-            build_asset_dependencies(
-                asset_path=failstate_blockout_cover_package,
-                include_hard=True,
-                include_soft=True,
-                limit=50,
-            ),
-        )
-    )
-    checks.append(
-        (
-            "asset_referencers_failstate_blockout_cover",
-            build_asset_referencers(
-                asset_path=failstate_blockout_cover_package,
-                include_hard=True,
-                include_soft=True,
-                limit=50,
-            ),
-        )
-    )
-    checks.append(
-        (
-            "blueprint_query_failstate_blockout_cover",
-            build_blueprint_query(
-                asset_path=failstate_blockout_cover_package,
-                include_variables=True,
-                include_components=True,
-                variable_limit=50,
-                component_limit=50,
-            ),
-        )
-    )
-    checks.append(
-        (
-            "get_editor_readiness_before_failstate_discovery",
-            build_editor_readiness(timeout_seconds=60, stable_samples=2),
-        )
-    )
-    checks.append(
-        (
-            "list_failstate_automation_tests",
-            build_automation_tests(prefix="Failstate.Phase1", limit=20),
-        )
-    )
-    checks.append(
-        (
-            "run_profile_automation_failstate_prefix",
-            build_profile_automation_run(
+            "run_project_compatibility_gates",
+            build_project_compatibility_gates(
                 profile_name=profile_name,
-                prefix="Failstate.Phase1",
                 limit=10,
                 timeout_seconds=30,
                 output_log_limit=10,
@@ -352,10 +301,10 @@ if actual_project != expected_project:
 
 project_context = dict(check_results["get_project_context"].get("data") or {})
 profile_source = dict(project_context.get("profile_source") or {})
-if is_failstate_project and profile_source.get("kind") != "environment":
+if expected_profile_source_kind and profile_source.get("kind") != expected_profile_source_kind:
     failures.append(
-        "Failstate smoke did not load the project-owned UEMCP profile pack: "
-        f"{profile_source}"
+        "Smoke did not load the expected UEMCP profile source kind "
+        f"{expected_profile_source_kind!r}: {profile_source}"
     )
 
 output_log = dict(check_results["get_output_log"].get("data") or {})
@@ -414,11 +363,14 @@ for ref_name in (
 recent_events = dict(check_results["get_observability_recent_events"].get("data") or {})
 recent_entries = recent_events.get("entries") or []
 recent_tools = {str(entry.get("tool")) for entry in recent_entries}
-for required_tool in (
+required_recent_tools = [
     "get_editor_readiness",
     "diagnose_editor_automation_readiness",
     "run_profile_automation_tests",
-):
+]
+if run_compatibility_gates:
+    required_recent_tools.append("run_project_compatibility_gates")
+for required_tool in required_recent_tools:
     if required_tool not in recent_tools:
         failures.append(
             "get_observability_recent_events did not return recent "
@@ -529,179 +481,40 @@ if profile_smoke_summary.get("total") != 1 or profile_smoke_summary.get("success
 if not (profile_smoke_run.get("output_log_tail") or {}).get("entries"):
     failures.append("run_profile_automation_tests did not return output_log_tail entries")
 
-if is_failstate_project:
-    failstate_asset_search = dict(check_results["asset_search_failstate_blockout"].get("data") or {})
-    failstate_asset_filters = dict(failstate_asset_search.get("filters") or {})
-    failstate_assets = failstate_asset_search.get("assets") or []
-    failstate_asset_names = {
-        str(asset.get("asset_name") or "")
-        for asset in failstate_assets
-    }
-    expected_blockout_assets = {
-        "BP_FSBlockoutCover",
-        "BP_FSBlockoutFloor",
-        "BP_FSBlockoutVisualOnly",
-    }
-    if failstate_asset_filters.get("package_path") != "/Game/Failstate/Blueprints/Blockout":
+if run_compatibility_gates:
+    compatibility_run = dict(check_results["run_project_compatibility_gates"].get("data") or {})
+    compatibility_summary = dict(compatibility_run.get("summary") or {})
+    compatibility_readiness = dict(compatibility_run.get("readiness") or {})
+    compatibility_profile_source = dict(compatibility_run.get("profile_source") or {})
+    compatibility_gates = compatibility_run.get("gates") or []
+    if compatibility_summary.get("total", 0) < 1:
         failures.append(
-            "asset_search did not normalize Failstate blockout root: "
-            f"{failstate_asset_search}"
+            "run_project_compatibility_gates returned no project compatibility gates: "
+            f"{compatibility_run}"
         )
-    if failstate_asset_search.get("matched_asset_count", 0) < len(expected_blockout_assets):
+    if compatibility_summary.get("successful") is not True:
         failures.append(
-            "asset_search did not find enough Failstate blockout assets: "
-            f"{failstate_asset_search}"
+            "run_project_compatibility_gates did not pass all project compatibility gates: "
+            f"{compatibility_run}"
         )
-    missing_blockout_assets = expected_blockout_assets - failstate_asset_names
-    if missing_blockout_assets:
+    if compatibility_readiness.get("ready") is not True:
         failures.append(
-            "asset_search missed expected Failstate blockout assets: "
-            f"{sorted(missing_blockout_assets)}"
+            "run_project_compatibility_gates did not gate execution on editor readiness: "
+            f"{compatibility_run}"
         )
-    for asset in failstate_assets:
-        package_path = str(asset.get("package_path") or "")
-        if not package_path.startswith("/Game/Failstate/Blueprints/Blockout"):
-            failures.append(f"asset_search returned outside Failstate blockout root: {asset}")
-
-    failstate_blockout_cover_package = "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover"
-    relationship_checks = (
-        (
-            "asset_dependencies_failstate_blockout_cover",
-            "dependencies",
-            "matched_dependency_count",
-            "returned_dependency_count",
-        ),
-        (
-            "asset_referencers_failstate_blockout_cover",
-            "referencers",
-            "matched_referencer_count",
-            "returned_referencer_count",
-        ),
-    )
-    for check_name, array_field, matched_count_field, returned_count_field in relationship_checks:
-        relationship_data = dict(check_results[check_name].get("data") or {})
-        relationship_filters = dict(relationship_data.get("filters") or {})
-        relationships = relationship_data.get(array_field) or []
-        if relationship_data.get("package_name") != failstate_blockout_cover_package:
-            failures.append(
-                f"{check_name} did not normalize the Blockout cover package: {relationship_data}"
-            )
-        if relationship_data.get("asset_found") is not True:
-            failures.append(f"{check_name} did not find source asset data: {relationship_data}")
-        if relationship_data.get("query_succeeded") is not True:
-            failures.append(f"{check_name} Asset Registry query did not report success: {relationship_data}")
-        if relationship_filters.get("include_hard") is not True:
-            failures.append(f"{check_name} did not include hard package relationships: {relationship_data}")
-        if relationship_filters.get("include_soft") is not True:
-            failures.append(f"{check_name} did not include soft package relationships: {relationship_data}")
-        if relationship_data.get(returned_count_field, 0) > 50:
-            failures.append(f"{check_name} returned more relationships than its limit: {relationship_data}")
-        if relationship_data.get(matched_count_field, 0) < relationship_data.get(returned_count_field, 0):
-            failures.append(f"{check_name} matched fewer relationships than it returned: {relationship_data}")
-        for relationship in relationships:
-            if not relationship.get("identifier"):
-                failures.append(f"{check_name} relationship missing identifier: {relationship}")
-            if not relationship.get("category"):
-                failures.append(f"{check_name} relationship missing category: {relationship}")
-            if "hard" not in relationship or "soft" not in relationship:
-                failures.append(f"{check_name} relationship missing hard/soft flags: {relationship}")
-            package_name = str(relationship.get("package_name") or "")
-            if package_name and not package_name.startswith("/"):
-                failures.append(f"{check_name} relationship package is not a long package name: {relationship}")
-
-    blueprint_data = dict(check_results["blueprint_query_failstate_blockout_cover"].get("data") or {})
-    blueprint_filters = dict(blueprint_data.get("filters") or {})
-    blueprint_source_asset = dict(blueprint_data.get("source_asset") or {})
-    blueprint_parent_class = dict(blueprint_data.get("parent_class") or {})
-    blueprint_generated_class = dict(blueprint_data.get("generated_class") or {})
-    blueprint_skeleton_class = dict(blueprint_data.get("skeleton_class") or {})
-    if blueprint_data.get("package_name") != failstate_blockout_cover_package:
+    if expected_profile_source_kind and compatibility_profile_source.get("kind") != expected_profile_source_kind:
         failures.append(
-            "blueprint_query did not normalize the Blockout cover package: "
-            f"{blueprint_data}"
+            "run_project_compatibility_gates used unexpected profile source: "
+            f"{compatibility_profile_source}"
         )
-    if blueprint_data.get("asset_found") is not True:
-        failures.append(f"blueprint_query did not find source asset data: {blueprint_data}")
-    if blueprint_source_asset.get("asset_class") != "Blueprint":
-        failures.append(f"blueprint_query source asset was not a Blueprint: {blueprint_data}")
-    if blueprint_data.get("blueprint_name") != "BP_FSBlockoutCover":
-        failures.append(f"blueprint_query returned unexpected Blueprint name: {blueprint_data}")
-    if not blueprint_data.get("status"):
-        failures.append(f"blueprint_query did not report Blueprint status: {blueprint_data}")
-    if blueprint_parent_class.get("exists") is not True or not blueprint_parent_class.get("class_name"):
-        failures.append(f"blueprint_query did not report a parent class: {blueprint_data}")
-    if blueprint_generated_class.get("exists") is not True or not blueprint_generated_class.get("class_name"):
-        failures.append(f"blueprint_query did not report a generated class: {blueprint_data}")
-    if blueprint_skeleton_class.get("exists") is not True or not blueprint_skeleton_class.get("class_name"):
-        failures.append(f"blueprint_query did not report a skeleton class: {blueprint_data}")
-    if blueprint_filters.get("include_variables") is not True:
-        failures.append(f"blueprint_query did not preserve include_variables: {blueprint_data}")
-    if blueprint_filters.get("include_components") is not True:
-        failures.append(f"blueprint_query did not preserve include_components: {blueprint_data}")
-    if blueprint_data.get("returned_variable_count", 0) > 50:
-        failures.append(f"blueprint_query returned more variables than its limit: {blueprint_data}")
-    if blueprint_data.get("returned_component_count", 0) > 50:
-        failures.append(f"blueprint_query returned more components than its limit: {blueprint_data}")
-    if blueprint_data.get("variable_count", 0) < blueprint_data.get("returned_variable_count", 0):
-        failures.append(f"blueprint_query variable counts are inconsistent: {blueprint_data}")
-    if blueprint_data.get("component_count", 0) < blueprint_data.get("returned_component_count", 0):
-        failures.append(f"blueprint_query component counts are inconsistent: {blueprint_data}")
-    for variable in blueprint_data.get("variables") or []:
-        if not variable.get("name"):
-            failures.append(f"blueprint_query variable missing name: {variable}")
-        if not isinstance(variable.get("type"), dict):
-            failures.append(f"blueprint_query variable missing type: {variable}")
-    for component in blueprint_data.get("components") or []:
-        if not component.get("variable_name"):
-            failures.append(f"blueprint_query component missing variable_name: {component}")
-        component_class = dict(component.get("component_class") or {})
-        if component_class.get("exists") is not True or not component_class.get("class_name"):
-            failures.append(f"blueprint_query component missing class metadata: {component}")
-        if component.get("template_exists") is True and not component.get("component_template_name"):
-            failures.append(f"blueprint_query component template missing name: {component}")
-
-    failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
-    returned_failstate_tests = failstate_tests.get("tests") or []
-    if not returned_failstate_tests:
-        failures.append("list_automation_tests returned no Failstate.Phase1 tests")
-    for test in returned_failstate_tests:
-        full_test_path = str(test.get("full_test_path") or test.get("test_name") or "")
-        if not full_test_path.startswith("Failstate.Phase1"):
-            failures.append(f"Failstate automation query returned outside-prefix test {full_test_path!r}")
-
-    failstate_profile_run = dict(
-        check_results["run_profile_automation_failstate_prefix"].get("data") or {}
-    )
-    failstate_profile_summary = dict(failstate_profile_run.get("summary") or {})
-    failstate_profile_readiness = dict(failstate_profile_run.get("readiness") or {})
-    if failstate_profile_run.get("mode") != "prefix":
+    if compatibility_run.get("observability_events") != []:
         failures.append(
-            f"run_profile_automation_tests did not use Failstate prefix mode: {failstate_profile_run}"
+            "run_project_compatibility_gates returned unexpected observability events: "
+            f"{compatibility_run.get('observability_events')}"
         )
-    if failstate_profile_readiness.get("ready") is not True:
-        failures.append(
-            "run_profile_automation_tests did not gate Failstate prefix on editor readiness: "
-            f"{failstate_profile_run}"
-        )
-    if not (failstate_profile_run.get("evidence_refs") or {}).get("readiness_request_id"):
-        failures.append("run_profile_automation_tests did not return Failstate readiness evidence")
-    if failstate_profile_run.get("observability_events") != []:
-        failures.append(
-            "run_profile_automation_tests returned unexpected Failstate observability events: "
-            f"{failstate_profile_run.get('observability_events')}"
-        )
-    if failstate_profile_run.get("prefix") != "Failstate.Phase1":
-        failures.append(
-            "run_profile_automation_tests used unexpected Failstate prefix: "
-            f"{failstate_profile_run.get('prefix')!r}"
-        )
-    if failstate_profile_summary.get("total", 0) < 1:
-        failures.append("run_profile_automation_tests returned no Failstate.Phase1 results")
-    if failstate_profile_summary.get("successful") is not True:
-        failures.append(
-            "run_profile_automation_tests did not pass the Failstate.Phase1 prefix batch: "
-            f"{failstate_profile_run}"
-        )
+    for gate in compatibility_gates:
+        if gate.get("ok") is not True:
+            failures.append(f"Project compatibility gate failed: {gate}")
 
 summary = {
     "ok": not failures,
@@ -732,6 +545,8 @@ print("SMOKE_OK")
 finally {
     $env:UEMCP_PROFILE_DIR = $PreviousProfileDir
     $env:UEMCP_PROFILE_NAME = $PreviousProfileName
+    $env:UEMCP_SMOKE_EXPECTED_PROFILE_SOURCE_KIND = $PreviousExpectedProfileSourceKind
+    $env:UEMCP_SMOKE_RUN_COMPATIBILITY_GATES = $PreviousRunCompatibilityGates
 
     if ($CloseLaunchedEditor -and $LaunchedEditor -and -not $LaunchedEditor.HasExited) {
         Write-Output "Closing launched Unreal Editor PID $($LaunchedEditor.Id)."

@@ -83,6 +83,7 @@ The history records:
 - `get_editor_readiness`
 - `diagnose_editor_automation_readiness`
 - `run_profile_automation_tests`
+- `run_project_compatibility_gates`
 
 Parameters:
 
@@ -339,6 +340,64 @@ This keeps the failed gate attached to the high-level command instead of relying
 
 This tool is intentionally a Python composition of `get_editor_readiness`, `list_automation_tests`, `run_automation_test`, and `get_output_log`; it does not add a new Unreal mutation path.
 
+## run_project_compatibility_gates
+
+Runs the active profile's project-owned compatibility gates against the live editor. This is the generic Phase 5 project-pack gate: UEMCP supplies the runner, while the consuming project supplies sentinel paths, assets, Blueprint identities, and automation prefixes in its profile.
+
+Parameters:
+
+- `profile_name`: profile to load. Defaults to `failstate` for compatibility.
+- `include_automation`: when true, default, run automation prefix gates from `compatibility_gates.automation_prefixes` or top-level `automation_test_prefixes`.
+- `limit`: default maximum automation tests per prefix, clamped from 1 to 50.
+- `timeout_seconds`: per-test automation timeout, clamped from 1 to 120 seconds.
+- `output_log_limit`: output log entries attached to each automation prefix run, clamped from 0 to 1000.
+- `require_ready`: when true, default, run one readiness preflight before all project compatibility gates.
+- `readiness_timeout_seconds`, `readiness_stable_samples`, `readiness_poll_interval_seconds`, `readiness_settle_seconds`: same readiness semantics as `run_profile_automation_tests`.
+
+The response includes:
+
+- `profile_name` and `profile_source`, so callers can prove whether the profile came from `UEMCP_PROFILE_DIR`, `.uemcp.local`, or packaged defaults.
+- `readiness`: one compact preflight gate for the whole project pack when `require_ready` is true.
+- `summary`: total, passed, failed, and successful counts across all compatibility gates.
+- `gates`: compact per-gate evidence. Current generic gate kinds are `sentinel_asset_search`, `sentinel_blueprint`, and `automation_prefix`.
+- `observability_events`: one `compatibility_gate_failed` event per failed gate. Successful runs return an empty list.
+- `evidence_refs`: request ids for readiness and each live gate.
+
+Supported profile schema under `compatibility_gates`:
+
+```json
+{
+  "sentinel_asset_searches": [
+    {
+      "name": "core_blueprints",
+      "root": "Content/Project/Blueprints",
+      "name_contains": "BP_",
+      "expected_assets": ["BP_Player", "BP_GameMode"],
+      "limit": 50
+    }
+  ],
+  "sentinel_blueprints": [
+    {
+      "name": "player_blueprint",
+      "asset_path": "/Game/Project/Blueprints/BP_Player",
+      "expected_blueprint_name": "BP_Player",
+      "expected_parent_class": "Character",
+      "expected_generated_class": "BP_Player_C"
+    }
+  ],
+  "automation_prefixes": [
+    {
+      "name": "phase1_tests",
+      "prefix": "Project.Phase1",
+      "min_tests": 1,
+      "limit": 10
+    }
+  ]
+}
+```
+
+When `automation_prefixes` is omitted, the runner uses top-level `automation_test_prefixes` as compatibility gates. Empty project packs are treated as unsuccessful because they do not prove compatibility.
+
 ## get_project_context
 
 Returns the active project profile without touching Unreal state. The default profile name remains `failstate` for compatibility, but the tool is project-neutral. Profile lookup order is:
@@ -373,7 +432,7 @@ The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches
 
 The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 
-The script also calls `get_observability_recent_events(limit=50)` at the end and requires recent `get_editor_readiness`, `diagnose_editor_automation_readiness`, and `run_profile_automation_tests` entries. The history read must not record itself and must not contain unexpected failed entries during a passing smoke. Finally, `summarize_observability_state(limit=50)` must report `state: ready`, no latest blocker, no recommended next step, a successful latest entry, and zero unsuccessful entries.
+The script also calls `get_observability_recent_events(limit=50)` at the end and requires recent `get_editor_readiness`, `diagnose_editor_automation_readiness`, and `run_profile_automation_tests` entries. When a project-owned profile directory is mounted, it also requires recent `run_project_compatibility_gates` history. The history read must not record itself and must not contain unexpected failed entries during a passing smoke. Finally, `summarize_observability_state(limit=50)` must report `state: ready`, no latest blocker, no recommended next step, a successful latest entry, and zero unsuccessful entries.
 
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 
@@ -385,6 +444,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It then requires `asset_dependencies` and `asset_referencers` for `/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover` to normalize the package, find source asset metadata, preserve the hard/soft filters, stay within the requested limit, and return well-formed relationship entries when Unreal reports any. It also requires `blueprint_query` for that Blockout cover Blueprint to report Blueprint source metadata, status, parent class, generated class, skeleton class, bounded variable counts, and bounded SCS component metadata. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
+When `-ProfileDir` is supplied or auto-detected from `<ProjectRoot>\Tools\UEMCP\profiles`, the script requires `get_project_context.profile_source.kind` to be `environment` and runs `run_project_compatibility_gates` against that mounted pack. The smoke fails if the pack has no gates, if any project compatibility gate fails, if readiness evidence is missing, if the profile source is not the mounted environment profile, or if successful gates emit observability events.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

@@ -30,7 +30,9 @@ The first supported UEMCP tools are read-mostly:
 - `uemcp_ping`
 - `get_editor_status`
 - `get_output_log`
+- `get_project_context`
 - `get_failstate_context`
+- `run_project_compatibility_gates`
 
 These tools return structured envelopes with request IDs, timing, editor identity, warnings, and categorized errors.
 
@@ -61,6 +63,7 @@ Against the Failstate worktree, attach the UEMCP repo plugin without installing 
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
   -CloseLaunchedEditor
 ```
 

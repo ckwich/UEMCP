@@ -38,6 +38,7 @@ _HISTORY_RECORDED_TOOLS = {
     "get_editor_readiness",
     "diagnose_editor_automation_readiness",
     "run_profile_automation_tests",
+    "run_project_compatibility_gates",
 }
 
 
@@ -164,7 +165,7 @@ def _history_summary(envelope: Dict[str, Any]) -> Dict[str, Any]:
             summary = dict(data.get("summary") or {})
             summary["ready_for_automation"] = bool(data.get("ready_for_automation", False))
             return summary
-        if tool == "run_profile_automation_tests":
+        if tool in {"run_profile_automation_tests", "run_project_compatibility_gates"}:
             return dict(data.get("summary") or {})
 
     error = envelope.get("error")
@@ -207,8 +208,11 @@ def _history_failure_category(
             "samples": list(data.get("samples") or []),
         }
         return _readiness_failure_category(readiness)
-    if tool == "run_profile_automation_tests" and summary.get("successful") is False:
-        return "automation_failed"
+    if summary.get("successful") is False:
+        if tool == "run_profile_automation_tests":
+            return "automation_failed"
+        if tool == "run_project_compatibility_gates":
+            return "compatibility_gate_failed"
 
     return None
 
@@ -247,6 +251,12 @@ def _history_message(
             if summary.get("successful")
             else "Profile automation run completed with failures"
         )
+    if tool == "run_project_compatibility_gates":
+        return (
+            "Project compatibility gates completed successfully"
+            if summary.get("successful")
+            else "Project compatibility gates completed with failures"
+        )
     return None
 
 
@@ -258,7 +268,7 @@ def _history_successful(envelope: Dict[str, Any], summary: Dict[str, Any]) -> bo
         return bool(summary.get("ready"))
     if tool == "diagnose_editor_automation_readiness":
         return bool(summary.get("ready_for_automation"))
-    if tool == "run_profile_automation_tests":
+    if tool in {"run_profile_automation_tests", "run_project_compatibility_gates"}:
         return bool(summary.get("successful"))
     return True
 
@@ -405,6 +415,33 @@ def _automation_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "errors": errors,
         "timed_out": timed_out,
         "successful": total > 0 and passed == total,
+    }
+
+
+def _compatibility_gate_summary(gates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total = len(gates)
+    failed = sum(1 for gate in gates if not gate.get("ok"))
+    return {
+        "total": total,
+        "passed": total - failed,
+        "failed": failed,
+        "successful": total > 0 and failed == 0,
+    }
+
+
+def _compatibility_gate_event(gate: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "compatibility_gate_failed",
+        "phase": "project_compatibility",
+        "severity": "error",
+        "failure_category": "compatibility_gate_failed",
+        "gate": gate.get("name"),
+        "kind": gate.get("kind"),
+        "message": gate.get("message") or "Project compatibility gate failed",
+        "request_id": gate.get("request_id"),
+        "evidence_refs": {
+            f"{gate.get('name')}_request_id": gate.get("request_id"),
+        },
     }
 
 
@@ -1131,7 +1168,7 @@ def build_profile_automation_run(
     readiness_settle_seconds: float = 0.0,
 ) -> Dict[str, Any]:
     started_at = utc_now()
-    context = get_failstate_context_data(profile_name)
+    context = get_project_context_data(profile_name)
     profile = dict(context["profile"])
     warnings = list(context["warnings"])
 
@@ -1280,6 +1317,367 @@ def build_profile_automation_run(
             started_at=started_at,
             data=data,
             warnings=warnings,
+        )
+    )
+
+
+def _gate_name(config: Dict[str, Any], fallback: str) -> str:
+    name = config.get("name")
+    return str(name) if name else fallback
+
+
+def _asset_search_gate(
+    connection_factory: Callable[[], Any],
+    gate_config: Dict[str, Any],
+    *,
+    index: int,
+) -> Dict[str, Any]:
+    name = _gate_name(gate_config, f"sentinel_asset_search_{index}")
+    envelope = build_asset_search(
+        connection_factory,
+        root=gate_config.get("root"),
+        class_name=gate_config.get("class_name"),
+        name_contains=gate_config.get("name_contains"),
+        path_contains=gate_config.get("path_contains"),
+        limit=int(gate_config.get("limit") or 100),
+    )
+    data = dict(envelope.get("data") or {})
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    assets = [dict(asset) for asset in data.get("assets") or [] if isinstance(asset, dict)]
+    found_assets = sorted({str(asset.get("asset_name") or "") for asset in assets if asset.get("asset_name")})
+    expected_assets = [str(asset) for asset in gate_config.get("expected_assets") or []]
+    missing_assets = sorted(set(expected_assets) - set(found_assets))
+    if missing_assets:
+        errors.append(f"Missing expected assets: {', '.join(missing_assets)}")
+
+    filters = dict(data.get("filters") or {})
+    package_path = str(filters.get("package_path") or "")
+    if package_path:
+        outside_root = [
+            str(asset.get("package_name") or asset.get("package_path") or "")
+            for asset in assets
+            if not str(asset.get("package_path") or "").startswith(package_path)
+        ]
+        if outside_root:
+            errors.append(f"Returned assets outside normalized root {package_path}: {outside_root}")
+
+    if data.get("truncated"):
+        warnings.append("Asset search result was truncated")
+    if data.get("asset_registry_loading"):
+        warnings.append("Asset Registry was still loading")
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Asset search command failed")
+
+    ok = bool(envelope.get("ok")) and not errors
+    return {
+        "name": name,
+        "kind": "sentinel_asset_search",
+        "tool": "asset_search",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": (
+            "Sentinel asset search passed"
+            if ok
+            else "; ".join(errors) or "Sentinel asset search failed"
+        ),
+        "errors": errors,
+        "warnings": warnings,
+        "expected_assets": expected_assets,
+        "found_assets": found_assets,
+        "missing_assets": missing_assets,
+        "returned_asset_count": data.get("returned_asset_count"),
+        "matched_asset_count": data.get("matched_asset_count"),
+        "truncated": data.get("truncated"),
+        "filters": filters,
+    }
+
+
+def _blueprint_gate(
+    connection_factory: Callable[[], Any],
+    gate_config: Dict[str, Any],
+    *,
+    index: int,
+) -> Dict[str, Any]:
+    name = _gate_name(gate_config, f"sentinel_blueprint_{index}")
+    variable_limit = int(gate_config.get("variable_limit") or 100)
+    component_limit = int(gate_config.get("component_limit") or 100)
+    envelope = build_blueprint_query(
+        connection_factory,
+        asset_path=str(gate_config.get("asset_path") or ""),
+        include_variables=bool(gate_config.get("include_variables", True)),
+        include_components=bool(gate_config.get("include_components", True)),
+        variable_limit=variable_limit,
+        component_limit=component_limit,
+    )
+    data = dict(envelope.get("data") or {})
+    parent_class = dict(data.get("parent_class") or {})
+    generated_class = dict(data.get("generated_class") or {})
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Blueprint query command failed")
+    if data and data.get("asset_found") is not True:
+        errors.append("Blueprint asset was not found")
+
+    expected_blueprint_name = gate_config.get("expected_blueprint_name")
+    if expected_blueprint_name and data.get("blueprint_name") != expected_blueprint_name:
+        errors.append(
+            "Unexpected Blueprint name: "
+            f"{data.get('blueprint_name')!r}, expected {expected_blueprint_name!r}"
+        )
+
+    expected_parent_class = gate_config.get("expected_parent_class")
+    if expected_parent_class and parent_class.get("class_name") != expected_parent_class:
+        errors.append(
+            "Unexpected parent class: "
+            f"{parent_class.get('class_name')!r}, expected {expected_parent_class!r}"
+        )
+
+    expected_generated_class = gate_config.get("expected_generated_class")
+    if expected_generated_class and generated_class.get("class_name") != expected_generated_class:
+        errors.append(
+            "Unexpected generated class: "
+            f"{generated_class.get('class_name')!r}, expected {expected_generated_class!r}"
+        )
+
+    if data and not data.get("status"):
+        warnings.append("Blueprint status was not reported")
+    if data.get("returned_variable_count", 0) > variable_limit:
+        errors.append("Blueprint query returned more variables than requested")
+    if data.get("returned_component_count", 0) > component_limit:
+        errors.append("Blueprint query returned more components than requested")
+    if data.get("asset_registry_loading"):
+        warnings.append("Asset Registry was still loading")
+
+    ok = bool(envelope.get("ok")) and not errors
+    return {
+        "name": name,
+        "kind": "sentinel_blueprint",
+        "tool": "blueprint_query",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": "Sentinel Blueprint passed" if ok else "; ".join(errors),
+        "errors": errors,
+        "warnings": warnings,
+        "asset_path": gate_config.get("asset_path"),
+        "blueprint_name": data.get("blueprint_name"),
+        "parent_class": parent_class.get("class_name"),
+        "generated_class": generated_class.get("class_name"),
+        "status": data.get("status"),
+        "filters": dict(data.get("filters") or {}),
+    }
+
+
+def _automation_prefix_gate_configs(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    compatibility_gates = dict(profile.get("compatibility_gates") or {})
+    configured_prefixes = compatibility_gates.get("automation_prefixes")
+    if configured_prefixes:
+        gate_configs: List[Dict[str, Any]] = []
+        for item in configured_prefixes:
+            if isinstance(item, dict):
+                gate_configs.append(dict(item))
+            else:
+                gate_configs.append({"prefix": str(item)})
+        return gate_configs
+    return [{"prefix": str(prefix)} for prefix in profile.get("automation_test_prefixes") or []]
+
+
+def _automation_prefix_gate(
+    connection_factory: Callable[[], Any],
+    gate_config: Dict[str, Any],
+    *,
+    profile_name: str,
+    index: int,
+    default_limit: int,
+    default_timeout_seconds: float,
+    output_log_limit: int,
+) -> Dict[str, Any]:
+    prefix = str(gate_config.get("prefix") or "")
+    name = _gate_name(gate_config, f"automation_prefix_{index}")
+    min_tests = max(1, int(gate_config.get("min_tests") or 1))
+    limit = max(1, min(int(gate_config.get("limit") or default_limit), MAX_PROFILE_AUTOMATION_RUNS))
+    timeout_seconds = max(1.0, min(float(gate_config.get("timeout_seconds") or default_timeout_seconds), 120.0))
+
+    if not prefix:
+        return {
+            "name": name,
+            "kind": "automation_prefix",
+            "tool": "run_profile_automation_tests",
+            "ok": False,
+            "request_id": None,
+            "message": "Automation prefix gate is missing a prefix",
+            "errors": ["Automation prefix gate is missing a prefix"],
+            "warnings": [],
+            "prefix": prefix,
+            "summary": {},
+            "tests": [],
+            "evidence_refs": {},
+        }
+
+    envelope = build_profile_automation_run(
+        connection_factory,
+        profile_name=profile_name,
+        prefix=prefix,
+        limit=limit,
+        timeout_seconds=timeout_seconds,
+        output_log_limit=output_log_limit,
+        require_ready=False,
+    )
+    data = dict(envelope.get("data") or {})
+    summary = dict(data.get("summary") or {})
+    errors: List[str] = []
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Automation prefix run failed")
+    if summary.get("total", 0) < min_tests:
+        errors.append(
+            f"Automation prefix returned {summary.get('total', 0)} tests, expected at least {min_tests}"
+        )
+    if summary.get("successful") is not True:
+        errors.append(f"Automation prefix summary was not successful: {summary}")
+    if data.get("prefix") != prefix:
+        errors.append(f"Automation run used prefix {data.get('prefix')!r}, expected {prefix!r}")
+
+    ok = bool(envelope.get("ok")) and not errors
+    return {
+        "name": name,
+        "kind": "automation_prefix",
+        "tool": "run_profile_automation_tests",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": "Automation prefix passed" if ok else "; ".join(errors),
+        "errors": errors,
+        "warnings": list(envelope.get("warnings") or []),
+        "prefix": prefix,
+        "summary": summary,
+        "tests": [
+            str(test.get("full_test_path") or test.get("test_name") or "")
+            for test in data.get("tests") or []
+        ],
+        "evidence_refs": dict(data.get("evidence_refs") or {}),
+    }
+
+
+def build_project_compatibility_gates(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    profile_name: str = "failstate",
+    include_automation: bool = True,
+    limit: int = 10,
+    timeout_seconds: float = 30.0,
+    output_log_limit: int = 10,
+    require_ready: bool = True,
+    readiness_timeout_seconds: float = 0.0,
+    readiness_stable_samples: int = 1,
+    readiness_poll_interval_seconds: float = 1.0,
+    readiness_settle_seconds: float = 0.0,
+) -> Dict[str, Any]:
+    started_at = utc_now()
+    context = get_project_context_data(profile_name)
+    profile = dict(context["profile"])
+    profile_source = dict(context["profile_source"])
+    compatibility_gates = dict(profile.get("compatibility_gates") or {})
+    warnings = list(context["warnings"])
+
+    bounded_limit = max(1, min(int(limit), MAX_PROFILE_AUTOMATION_RUNS))
+    bounded_output_log_limit = max(0, min(int(output_log_limit), 1000))
+    readiness = None
+
+    if require_ready:
+        readiness_envelope = build_editor_readiness(
+            connection_factory,
+            timeout_seconds=readiness_timeout_seconds,
+            stable_samples=readiness_stable_samples,
+            poll_interval_seconds=readiness_poll_interval_seconds,
+            settle_seconds=readiness_settle_seconds,
+        )
+        readiness = _compact_readiness_result(readiness_envelope)
+        if not readiness["ready"]:
+            readiness_event = _readiness_failure_event(
+                readiness,
+                phase="project_compatibility_preflight",
+            )
+            raw_readiness = dict(readiness)
+            raw_readiness["profile_name"] = profile_name
+            raw_readiness["profile_source"] = profile_source
+            raw_readiness["failure_category"] = readiness_event["failure_category"]
+            raw_readiness["observability_events"] = [readiness_event]
+            return _record_observability_envelope(
+                build_error_envelope(
+                    tool="run_project_compatibility_gates",
+                    started_at=started_at,
+                    message=readiness_event["message"],
+                    category=readiness_event["failure_category"],
+                    raw=raw_readiness,
+                    warnings=warnings + list(readiness_envelope.get("warnings") or []),
+                    editor=_editor_identity(readiness["latest_status"]),
+                )
+            )
+        warnings.extend(readiness_envelope.get("warnings") or [])
+
+    gates: List[Dict[str, Any]] = []
+    for index, gate_config in enumerate(compatibility_gates.get("sentinel_asset_searches") or [], 1):
+        if isinstance(gate_config, dict):
+            gates.append(_asset_search_gate(connection_factory, gate_config, index=index))
+        else:
+            warnings.append(f"Skipping malformed sentinel_asset_search gate: {gate_config!r}")
+
+    for index, gate_config in enumerate(compatibility_gates.get("sentinel_blueprints") or [], 1):
+        if isinstance(gate_config, dict):
+            gates.append(_blueprint_gate(connection_factory, gate_config, index=index))
+        else:
+            warnings.append(f"Skipping malformed sentinel_blueprint gate: {gate_config!r}")
+
+    if include_automation:
+        for index, gate_config in enumerate(_automation_prefix_gate_configs(profile), 1):
+            gates.append(
+                _automation_prefix_gate(
+                    connection_factory,
+                    gate_config,
+                    profile_name=profile_name,
+                    index=index,
+                    default_limit=bounded_limit,
+                    default_timeout_seconds=timeout_seconds,
+                    output_log_limit=bounded_output_log_limit,
+                )
+            )
+
+    summary = _compatibility_gate_summary(gates)
+    if not gates:
+        warnings.append(f"Profile '{profile_name}' does not define compatibility gates")
+
+    observability_events = [
+        _compatibility_gate_event(gate)
+        for gate in gates
+        if not gate.get("ok")
+    ]
+    data = {
+        "profile_name": profile_name,
+        "profile_source": profile_source,
+        "readiness": readiness,
+        "summary": summary,
+        "gates": gates,
+        "observability_events": observability_events,
+        "evidence_refs": {
+            "readiness_request_id": readiness["readiness_request_id"] if readiness else None,
+            "gate_request_ids": [
+                str(gate.get("request_id"))
+                for gate in gates
+                if gate.get("request_id")
+            ],
+        },
+    }
+
+    editor = _editor_identity(readiness["latest_status"]) if readiness else {}
+    return _record_observability_envelope(
+        build_success_envelope(
+            tool="run_project_compatibility_gates",
+            started_at=started_at,
+            data=data,
+            warnings=warnings,
+            editor=editor,
         )
     )
 
@@ -1510,6 +1908,34 @@ def register_observability_tools(mcp: FastMCP):
             profile_name=profile_name,
             test_name=test_name,
             prefix=prefix,
+            limit=limit,
+            timeout_seconds=timeout_seconds,
+            output_log_limit=output_log_limit,
+            require_ready=require_ready,
+            readiness_timeout_seconds=readiness_timeout_seconds,
+            readiness_stable_samples=readiness_stable_samples,
+            readiness_poll_interval_seconds=readiness_poll_interval_seconds,
+            readiness_settle_seconds=readiness_settle_seconds,
+        )
+
+    @mcp.tool()
+    def run_project_compatibility_gates(
+        ctx: Context,
+        profile_name: str = "failstate",
+        include_automation: bool = True,
+        limit: int = 10,
+        timeout_seconds: float = 30.0,
+        output_log_limit: int = 10,
+        require_ready: bool = True,
+        readiness_timeout_seconds: float = 0.0,
+        readiness_stable_samples: int = 1,
+        readiness_poll_interval_seconds: float = 1.0,
+        readiness_settle_seconds: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Run profile-declared project compatibility gates against the live editor."""
+        return build_project_compatibility_gates(
+            profile_name=profile_name,
+            include_automation=include_automation,
             limit=limit,
             timeout_seconds=timeout_seconds,
             output_log_limit=output_log_limit,

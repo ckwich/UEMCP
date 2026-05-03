@@ -145,8 +145,8 @@ Before calling Phase 1 complete:
 - Confirm `summarize_observability_state` reports `state: ready`, no latest
   blocker, no recommended next step, and zero unsuccessful entries during a
   passing smoke.
-- Confirm `get_failstate_context` reports `profile_source.kind` as `local` or
-  `environment` for real local Failstate work.
+- Confirm `get_project_context` reports `profile_source.kind` as `environment`
+  for project-owned profile packs, or `local` for private machine overrides.
 - Confirm the UEMCP git tree is clean after commits.
 - Confirm adjacent Failstate worktree changes are only expected user/editor
   changes and are not staged from UEMCP.

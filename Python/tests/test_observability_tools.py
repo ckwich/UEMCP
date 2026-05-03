@@ -1,3 +1,5 @@
+import json
+
 from tools.observability_tools import (
     build_asset_dependencies,
     build_asset_referencers,
@@ -13,6 +15,7 @@ from tools.observability_tools import (
     build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
+    build_project_compatibility_gates,
     build_project_context,
     build_uemcp_ping,
     clear_observability_history,
@@ -648,6 +651,7 @@ def test_register_observability_tools_exposes_asset_registry_relationship_tools(
     assert "asset_referencers" in recorder.tools
     assert "blueprint_query" in recorder.tools
     assert "get_project_context" in recorder.tools
+    assert "run_project_compatibility_gates" in recorder.tools
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
@@ -1478,3 +1482,275 @@ def test_build_project_context_returns_profile_envelope():
     assert envelope["tool"] == "get_project_context"
     assert envelope["data"]["active_profile"] == "failstate"
     assert envelope["data"]["read_only"] is True
+
+
+def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "automation_test_prefixes": ["Example.Phase1"],
+                "log_categories": ["LogTemp"],
+                "known_maps": [],
+                "compatibility_gates": {
+                    "sentinel_asset_searches": [
+                        {
+                            "name": "example_blueprints",
+                            "root": "Content/Example/Blueprints",
+                            "name_contains": "BP_Example",
+                            "expected_assets": ["BP_ExampleCore"],
+                            "limit": 20,
+                        }
+                    ],
+                    "sentinel_blueprints": [
+                        {
+                            "name": "example_core",
+                            "asset_path": "/Game/Example/Blueprints/BP_ExampleCore",
+                            "expected_blueprint_name": "BP_ExampleCore",
+                            "expected_parent_class": "Actor",
+                            "expected_generated_class": "BP_ExampleCore_C",
+                            "include_variables": True,
+                            "include_components": False,
+                            "variable_limit": 10,
+                            "component_limit": 5,
+                        }
+                    ],
+                },
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Test",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "assets": [
+                        {
+                            "asset_name": "BP_ExampleCore",
+                            "object_path": "/Game/Example/Blueprints/BP_ExampleCore.BP_ExampleCore",
+                            "package_name": "/Game/Example/Blueprints/BP_ExampleCore",
+                            "package_path": "/Game/Example/Blueprints",
+                            "asset_class": "Blueprint",
+                        }
+                    ],
+                    "matched_asset_count": 1,
+                    "returned_asset_count": 1,
+                    "truncated": False,
+                    "asset_registry_loading": False,
+                    "filters": {
+                        "root": "Content/Example/Blueprints",
+                        "package_path": "/Game/Example/Blueprints",
+                        "name_contains": "BP_Example",
+                        "limit": 20,
+                    },
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "asset_found": True,
+                    "asset_path": "/Game/Example/Blueprints/BP_ExampleCore",
+                    "package_name": "/Game/Example/Blueprints/BP_ExampleCore",
+                    "blueprint_name": "BP_ExampleCore",
+                    "status": "UpToDate",
+                    "parent_class": {"class_name": "Actor"},
+                    "generated_class": {"class_name": "BP_ExampleCore_C"},
+                    "returned_variable_count": 0,
+                    "returned_component_count": 0,
+                    "asset_registry_loading": False,
+                    "filters": {
+                        "asset_path": "/Game/Example/Blueprints/BP_ExampleCore",
+                        "include_variables": True,
+                        "include_components": False,
+                        "variable_limit": 10,
+                        "component_limit": 5,
+                    },
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "tests": [
+                        {
+                            "full_test_path": "Example.Phase1.Project.Ready",
+                            "test_name": "FExampleReadyTest",
+                        }
+                    ],
+                    "matched_test_count": 1,
+                    "returned_test_count": 1,
+                    "truncated": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "test": {
+                        "full_test_path": "Example.Phase1.Project.Ready",
+                        "test_name": "FExampleReadyTest",
+                    },
+                    "status": "passed",
+                    "successful": True,
+                    "duration_seconds": 0.01,
+                    "error_count": 0,
+                    "warning_count": 0,
+                    "events": [],
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        limit=5,
+        timeout_seconds=7,
+        output_log_limit=0,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "run_project_compatibility_gates"
+    assert envelope["data"]["profile_source"]["kind"] == "environment"
+    assert envelope["data"]["summary"] == {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "successful": True,
+    }
+    assert [gate["kind"] for gate in envelope["data"]["gates"]] == [
+        "sentinel_asset_search",
+        "sentinel_blueprint",
+        "automation_prefix",
+    ]
+    assert envelope["data"]["observability_events"] == []
+    assert connection.calls == [
+        ("get_editor_status", {}),
+        (
+            "asset_search",
+            {
+                "root": "Content/Example/Blueprints",
+                "name_contains": "BP_Example",
+                "limit": 20,
+            },
+        ),
+        (
+            "blueprint_query",
+            {
+                "asset_path": "/Game/Example/Blueprints/BP_ExampleCore",
+                "include_variables": True,
+                "include_components": False,
+                "variable_limit": 10,
+                "component_limit": 5,
+            },
+        ),
+        ("list_automation_tests", {"limit": 5, "prefix": "Example.Phase1"}),
+        (
+            "run_automation_test",
+            {
+                "test_name": "Example.Phase1.Project.Ready",
+                "timeout_seconds": 7.0,
+            },
+        ),
+    ]
+
+
+def test_build_project_compatibility_gates_reports_missing_sentinel_asset(
+    monkeypatch,
+    tmp_path,
+):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "automation_test_prefixes": [],
+                "log_categories": ["LogTemp"],
+                "known_maps": [],
+                "compatibility_gates": {
+                    "sentinel_asset_searches": [
+                        {
+                            "name": "example_blueprints",
+                            "root": "Content/Example/Blueprints",
+                            "expected_assets": ["BP_ExampleCore"],
+                            "limit": 20,
+                        }
+                    ]
+                },
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Test",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "assets": [],
+                    "matched_asset_count": 0,
+                    "returned_asset_count": 0,
+                    "truncated": False,
+                    "asset_registry_loading": False,
+                    "filters": {
+                        "root": "Content/Example/Blueprints",
+                        "package_path": "/Game/Example/Blueprints",
+                        "limit": 20,
+                    },
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 1,
+        "passed": 0,
+        "failed": 1,
+        "successful": False,
+    }
+    gate = envelope["data"]["gates"][0]
+    assert gate["ok"] is False
+    assert gate["missing_assets"] == ["BP_ExampleCore"]
+    assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
