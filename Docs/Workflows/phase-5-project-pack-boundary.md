@@ -33,6 +33,7 @@ The profile names content roots, automation prefixes, log categories, known maps
 `run_project_compatibility_gates` currently supports these profile-driven gate kinds:
 
 - `sentinel_maps`: proves the live editor is currently on an expected map.
+- `sentinel_level_snapshots`: proves the current level can be observed through a bounded actor snapshot and can assert representative actor names/classes or minimum actor counts.
 - `sentinel_asset_searches`: proves a content root resolves and named sentinel assets are discoverable.
 - `sentinel_blueprints`: proves a representative Blueprint resolves and reports expected class identity.
 - `automation_prefixes`: optionally overrides the top-level automation prefixes for compatibility validation.
@@ -78,7 +79,7 @@ uv --directory Python run python -m uemcp_neutrality
 
 The audit scans tracked files for project-specific strings and allows them only in explicit compatibility/example locations listed in `Scripts/UEMCPNeutrality.Audit.json`.
 
-UEMCP sample smoke remains the public neutral gate:
+UEMCP sample smoke remains the public neutral gate. When `-PluginPath` points at a plugin under a different Unreal project, the smoke builds that plugin owner project before launching the target project so the attached plugin DLL is current:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor

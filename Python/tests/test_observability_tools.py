@@ -11,6 +11,7 @@ from tools.observability_tools import (
     build_editor_status,
     build_editor_readiness,
     build_failstate_context,
+    build_level_snapshot,
     build_observability_recent_events,
     build_observability_state_summary,
     build_output_log,
@@ -646,12 +647,66 @@ def test_register_observability_tools_exposes_asset_registry_relationship_tools(
 
     register_observability_tools(recorder)
 
+    assert "get_level_snapshot" in recorder.tools
     assert "asset_search" in recorder.tools
     assert "asset_dependencies" in recorder.tools
     assert "asset_referencers" in recorder.tools
     assert "blueprint_query" in recorder.tools
     assert "get_project_context" in recorder.tools
     assert "run_project_compatibility_gates" in recorder.tools
+
+
+def test_build_level_snapshot_passes_bounded_filters_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "current_map": "/Game/Example/Maps/L_Test",
+                "total_actor_count": 3,
+                "matched_actor_count": 1,
+                "returned_actor_count": 1,
+                "truncated": False,
+                "filters": {
+                    "limit": 1000,
+                    "class_name": "StaticMeshActor",
+                    "name_contains": "Cover",
+                    "include_components": True,
+                    "component_limit": 1,
+                },
+                "actors": [
+                    {
+                        "name": "BP_Cover_01",
+                        "label": "Cover 01",
+                        "class": "StaticMeshActor",
+                    }
+                ],
+            },
+        }
+    )
+
+    envelope = build_level_snapshot(
+        lambda: connection,
+        limit=5000,
+        class_name="StaticMeshActor",
+        name_contains="Cover",
+        include_components=True,
+        component_limit=0,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "get_level_snapshot"
+    assert connection.calls == [
+        (
+            "get_level_snapshot",
+            {
+                "limit": 1000,
+                "class_name": "StaticMeshActor",
+                "name_contains": "Cover",
+                "include_components": True,
+                "component_limit": 1,
+            },
+        )
+    ]
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
@@ -1508,6 +1563,15 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
                             "expected_maps": ["/Game/Example/Maps/L_Test"],
                         }
                     ],
+                    "sentinel_level_snapshots": [
+                        {
+                            "name": "example_level_snapshot",
+                            "limit": 20,
+                            "min_total_actor_count": 2,
+                            "expected_actor_names": ["ExampleAnchor"],
+                            "expected_actor_classes": ["BP_ExampleAnchor_C"],
+                        }
+                    ],
                     "sentinel_asset_searches": [
                         {
                             "name": "example_blueprints",
@@ -1553,6 +1617,26 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
                     "current_map": "/Game/Example/Maps/L_Test",
                     "is_pie_running": False,
                     "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Test",
+                    "total_actor_count": 3,
+                    "matched_actor_count": 3,
+                    "returned_actor_count": 3,
+                    "truncated": False,
+                    "filters": {"limit": 20},
+                    "actors": [
+                        {
+                            "name": "ExampleAnchor",
+                            "label": "Example Anchor",
+                            "class": "BP_ExampleAnchor_C",
+                        },
+                        {"name": "Floor", "class": "StaticMeshActor"},
+                        {"name": "Light", "class": "PointLight"},
+                    ],
                 },
             },
             {
@@ -1645,13 +1729,14 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
     assert envelope["tool"] == "run_project_compatibility_gates"
     assert envelope["data"]["profile_source"]["kind"] == "environment"
     assert envelope["data"]["summary"] == {
-        "total": 4,
-        "passed": 4,
+        "total": 5,
+        "passed": 5,
         "failed": 0,
         "successful": True,
     }
     assert [gate["kind"] for gate in envelope["data"]["gates"]] == [
         "sentinel_map",
+        "sentinel_level_snapshot",
         "sentinel_asset_search",
         "sentinel_blueprint",
         "automation_prefix",
@@ -1660,6 +1745,7 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
     assert connection.calls == [
         ("get_editor_status", {}),
         ("get_editor_status", {}),
+        ("get_level_snapshot", {"limit": 20}),
         (
             "asset_search",
             {
@@ -1769,6 +1855,88 @@ def test_build_project_compatibility_gates_reports_missing_sentinel_asset(
     gate = envelope["data"]["gates"][0]
     assert gate["ok"] is False
     assert gate["missing_assets"] == ["BP_ExampleCore"]
+    assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
+
+
+def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
+    monkeypatch,
+    tmp_path,
+):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "automation_test_prefixes": [],
+                "log_categories": ["LogTemp"],
+                "known_maps": ["/Game/Example/Maps/L_Test"],
+                "compatibility_gates": {
+                    "sentinel_level_snapshots": [
+                        {
+                            "name": "example_level_snapshot",
+                            "min_total_actor_count": 2,
+                            "expected_actor_names": ["MissingAnchor"],
+                            "expected_actor_classes": ["BP_MissingAnchor_C"],
+                        }
+                    ]
+                },
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Test",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "total_actor_count": 1,
+                    "matched_actor_count": 1,
+                    "returned_actor_count": 1,
+                    "truncated": False,
+                    "actors": [{"name": "OtherActor", "class": "StaticMeshActor"}],
+                    "filters": {"limit": 100},
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 1,
+        "passed": 0,
+        "failed": 1,
+        "successful": False,
+    }
+    gate = envelope["data"]["gates"][0]
+    assert gate["kind"] == "sentinel_level_snapshot"
+    assert gate["ok"] is False
+    assert gate["missing_actor_names"] == ["MissingAnchor"]
+    assert gate["missing_actor_classes"] == ["BP_MissingAnchor_C"]
+    assert "expected at least 2" in gate["message"]
     assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
 
 

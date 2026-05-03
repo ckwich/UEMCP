@@ -47,6 +47,7 @@ foreach ($PathToCheck in @($EditorPath, $BuildPath, $ProjectPath, $PythonDir)) {
 $ResolvedProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
 $ResolvedDefaultProjectPath = (Resolve-Path -LiteralPath $DefaultProjectPath).Path
 $ResolvedPluginPath = $null
+$ResolvedPluginOwnerProjectPath = $null
 $ResolvedProfileDir = $null
 
 if (-not $ProfileName) {
@@ -93,7 +94,53 @@ function Get-UemcpBridgeListener {
         Select-Object -First 1
 }
 
+function Find-PluginOwnerProjectPath([string]$PluginFilePath) {
+    $SearchDir = Split-Path -Parent $PluginFilePath
+    while ($SearchDir) {
+        $ProjectCandidate = Get-ChildItem `
+            -LiteralPath $SearchDir `
+            -Filter "*.uproject" `
+            -File `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($ProjectCandidate) {
+            return $ProjectCandidate.FullName
+        }
+
+        $ParentDir = Split-Path -Parent $SearchDir
+        if (-not $ParentDir -or $ParentDir -eq $SearchDir) {
+            break
+        }
+        $SearchDir = $ParentDir
+    }
+
+    return $null
+}
+
+if ($ResolvedPluginPath) {
+    $PluginOwnerProjectPath = Find-PluginOwnerProjectPath $ResolvedPluginPath
+    if ($PluginOwnerProjectPath) {
+        $ResolvedPluginOwnerProjectPath = (Resolve-Path -LiteralPath $PluginOwnerProjectPath).Path
+    }
+}
+
 if (-not $SkipBuild) {
+    if ($ResolvedPluginOwnerProjectPath -and $ResolvedPluginOwnerProjectPath -ne $ResolvedProjectPath) {
+        Write-Output "Building plugin owner editor target for $ResolvedPluginOwnerProjectPath with $BuildPath"
+        & $BuildPath `
+            Development `
+            Win64 `
+            "-Project=$ResolvedPluginOwnerProjectPath" `
+            -TargetType=Editor `
+            -Progress `
+            -NoEngineChanges `
+            -NoHotReloadFromIDE
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Plugin owner editor target build failed with exit code $LASTEXITCODE."
+        }
+    }
+
     Write-Output "Building editor target for $ResolvedProjectPath with $BuildPath"
     & $BuildPath `
         Development `
@@ -181,6 +228,7 @@ from tools.observability_tools import (
     build_editor_automation_readiness_diagnostic,
     build_editor_readiness,
     build_editor_status,
+    build_level_snapshot,
     build_observability_recent_events,
     build_observability_state_summary,
     build_output_log,
@@ -206,6 +254,7 @@ checks = []
 checks.append(("uemcp_ping", build_uemcp_ping()))
 checks.append(("get_editor_status", build_editor_status()))
 checks.append(("get_output_log", build_output_log(limit=5)))
+checks.append(("get_level_snapshot", build_level_snapshot(limit=25)))
 checks.append(("asset_search_game_root", build_asset_search(root="/Game", limit=20)))
 checks.append(
     (
@@ -311,6 +360,19 @@ output_log = dict(check_results["get_output_log"].get("data") or {})
 output_log_entries = output_log.get("entries") or []
 if not output_log_entries:
     failures.append("get_output_log returned no entries; expected live captured log entries")
+
+level_snapshot = dict(check_results["get_level_snapshot"].get("data") or {})
+level_snapshot_filters = dict(level_snapshot.get("filters") or {})
+if level_snapshot_filters.get("limit") != 25:
+    failures.append(f"get_level_snapshot did not report the requested limit: {level_snapshot}")
+if level_snapshot.get("returned_actor_count", 0) > 25:
+    failures.append(f"get_level_snapshot returned more actors than its limit: {level_snapshot}")
+if level_snapshot.get("total_actor_count", 0) < level_snapshot.get("returned_actor_count", 0):
+    failures.append(f"get_level_snapshot returned impossible actor counts: {level_snapshot}")
+for actor in level_snapshot.get("actors") or []:
+    for field_name in ("name", "class", "path", "location", "rotation", "scale"):
+        if not actor.get(field_name):
+            failures.append(f"get_level_snapshot actor missing {field_name}: {actor}")
 
 asset_search = dict(check_results["asset_search_game_root"].get("data") or {})
 asset_search_filters = dict(asset_search.get("filters") or {})

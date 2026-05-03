@@ -30,6 +30,11 @@ The first supported UEMCP tools are read-mostly:
 - `uemcp_ping`
 - `get_editor_status`
 - `get_output_log`
+- `get_level_snapshot`
+- `asset_search`
+- `asset_dependencies`
+- `asset_referencers`
+- `blueprint_query`
 - `get_project_context`
 - `get_failstate_context`
 - `run_project_compatibility_gates`

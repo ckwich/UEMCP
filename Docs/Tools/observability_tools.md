@@ -140,6 +140,31 @@ The response includes:
 
 Each entry includes `sequence`, `time_seconds`, `timestamp_utc`, `category`, `verbosity`, and `message`.
 
+## get_level_snapshot
+
+Returns a bounded read-only snapshot of actors in the current editor world. Use it after `get_editor_status` has proven the expected map is loaded and before project-specific automation needs evidence that level content is present.
+
+Parameters:
+
+- `limit`: maximum actors returned, clamped from 1 to 1000.
+- `class_name`: optional actor class or class-path substring filter.
+- `name_contains`: optional actor name or editor-label substring filter.
+- `include_components`: when true, include bounded component identity for each returned actor.
+- `component_limit`: maximum components per actor when components are included, clamped from 1 to 1000.
+
+The response includes:
+
+- `current_map`, `is_pie_running`, and `selected_actor_count`.
+- `world`: editor-world name, current map, world type, and path.
+- `total_actor_count`: valid actors in the editor world before filters.
+- `matched_actor_count`: actors matching the class/name filters before `limit`.
+- `returned_actor_count`: actors included in the returned array.
+- `truncated`: true when more matching actors exist than were returned.
+- `filters`: normalized filters used by the bridge.
+- `actors`: bounded actor entries.
+
+Each actor includes `name`, editor `label`, `class`, `class_path`, object `path`, `level_name`, `hidden`, `location`, `rotation`, and `scale`. When component inclusion is enabled, the actor also reports component counts and bounded component identity.
+
 ## asset_search
 
 Searches Unreal Asset Registry metadata on the game thread without loading, saving, or mutating assets. Use this as the first Phase 2 content-observation gate before dependency, referencer, Blueprint, or level-inspection tools.
@@ -359,7 +384,7 @@ The response includes:
 - `profile_name` and `profile_source`, so callers can prove whether the profile came from `UEMCP_PROFILE_DIR`, `.uemcp.local`, or packaged defaults.
 - `readiness`: one compact preflight gate for the whole project pack when `require_ready` is true.
 - `summary`: total, passed, failed, and successful counts across all compatibility gates.
-- `gates`: compact per-gate evidence. Current generic gate kinds are `sentinel_map`, `sentinel_asset_search`, `sentinel_blueprint`, and `automation_prefix`.
+- `gates`: compact per-gate evidence. Current generic gate kinds are `sentinel_map`, `sentinel_level_snapshot`, `sentinel_asset_search`, `sentinel_blueprint`, and `automation_prefix`.
 - `observability_events`: one `compatibility_gate_failed` event per failed gate. Successful runs return an empty list.
 - `evidence_refs`: request ids for readiness and each live gate.
 
@@ -371,6 +396,15 @@ Supported profile schema under `compatibility_gates`:
     {
       "name": "current_map_ready",
       "expected_maps": ["/Game/Project/Maps/L_Test"]
+    }
+  ],
+  "sentinel_level_snapshots": [
+    {
+      "name": "level_anchor_present",
+      "min_total_actor_count": 1,
+      "expected_actor_names": ["LevelAnchor"],
+      "expected_actor_classes": ["BP_LevelAnchor_C"],
+      "limit": 100
     }
   ],
   "sentinel_asset_searches": [
@@ -436,7 +470,9 @@ Use the repo smoke script to prove the editor-target build, bridge listener, and
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
 ```
 
-The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, if category/substring filtering returns entries outside the requested filter, or if `asset_search(root="/Game", limit=20)` returns assets outside `/Game` or outside the requested limit.
+The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, if `get_level_snapshot(limit=25)` violates its actor count bounds, if category/substring filtering returns entries outside the requested filter, or if `asset_search(root="/Game", limit=20)` returns assets outside `/Game` or outside the requested limit.
+
+When `-PluginPath` points at a plugin under a different Unreal project, the script builds that plugin owner project first so attached-plugin smoke runs exercise the current plugin source, not a stale DLL.
 
 The script also requires `get_editor_readiness(timeout_seconds=90, stable_samples=2, settle_seconds=20)` to report ready before the first automation gate, then requires a shorter readiness check before the direct `run_automation_test` call. After readiness, `list_automation_tests(prefix="UEMCP.")` must return `UEMCP.Observability.Smoke`, `run_automation_test("UEMCP.Observability.Smoke")` must pass with zero errors, and `run_profile_automation_tests(test_name="UEMCP.Observability.Smoke", require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` must return a successful single-test summary, readiness evidence, an empty `observability_events` list, and output-log tail evidence.
 

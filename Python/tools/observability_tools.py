@@ -757,6 +757,36 @@ def build_output_log(
     )
 
 
+def build_level_snapshot(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    limit: int = 100,
+    class_name: Optional[str] = None,
+    name_contains: Optional[str] = None,
+    include_components: bool = False,
+    component_limit: int = 20,
+) -> Dict[str, Any]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    bounded_component_limit = max(1, min(int(component_limit), 1000))
+    params: Dict[str, Any] = {
+        "limit": bounded_limit,
+    }
+    if class_name:
+        params["class_name"] = class_name
+    if name_contains:
+        params["name_contains"] = name_contains
+    if include_components:
+        params["include_components"] = True
+        params["component_limit"] = bounded_component_limit
+
+    return execute_bridge_command(
+        tool="get_level_snapshot",
+        command="get_level_snapshot",
+        connection_factory=connection_factory,
+        params=params,
+    )
+
+
 def build_automation_tests(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -1453,6 +1483,106 @@ def _map_gate(
     }
 
 
+def _actor_values(actors: List[Dict[str, Any]], fields: List[str]) -> List[str]:
+    values: List[str] = []
+    for actor in actors:
+        for field in fields:
+            value = actor.get(field)
+            if value:
+                values.append(str(value))
+    return values
+
+
+def _level_snapshot_gate(
+    connection_factory: Callable[[], Any],
+    gate_config: Dict[str, Any],
+    *,
+    index: int,
+) -> Dict[str, Any]:
+    name = _gate_name(gate_config, f"sentinel_level_snapshot_{index}")
+    limit = int(gate_config.get("limit") or 100)
+    component_limit = int(gate_config.get("component_limit") or 20)
+    envelope = build_level_snapshot(
+        connection_factory,
+        limit=limit,
+        class_name=gate_config.get("class_name"),
+        name_contains=gate_config.get("name_contains"),
+        include_components=bool(gate_config.get("include_components", False)),
+        component_limit=component_limit,
+    )
+    data = dict(envelope.get("data") or {})
+    actors = [
+        dict(actor)
+        for actor in data.get("actors") or []
+        if isinstance(actor, dict)
+    ]
+    total_actor_count = int(data.get("total_actor_count") or 0)
+    matched_actor_count = int(data.get("matched_actor_count") or len(actors))
+    returned_actor_count = int(data.get("returned_actor_count") or len(actors))
+    min_total_actor_count = max(0, int(gate_config.get("min_total_actor_count") or 0))
+
+    expected_actor_names = [
+        str(actor_name)
+        for actor_name in gate_config.get("expected_actor_names") or []
+        if str(actor_name)
+    ]
+    expected_actor_classes = [
+        str(actor_class)
+        for actor_class in gate_config.get("expected_actor_classes") or []
+        if str(actor_class)
+    ]
+    actor_names = set(_actor_values(actors, ["name", "label", "path"]))
+    actor_classes = set(_actor_values(actors, ["class", "class_name", "class_path"]))
+    missing_actor_names = [
+        actor_name
+        for actor_name in expected_actor_names
+        if actor_name not in actor_names
+    ]
+    missing_actor_classes = [
+        actor_class
+        for actor_class in expected_actor_classes
+        if actor_class not in actor_classes
+    ]
+
+    errors: List[str] = []
+    warnings: List[str] = list(envelope.get("warnings") or [])
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Level snapshot command failed")
+    if min_total_actor_count and total_actor_count < min_total_actor_count:
+        errors.append(
+            "Level snapshot reported "
+            f"{total_actor_count} total actors, expected at least {min_total_actor_count}"
+        )
+    if missing_actor_names:
+        errors.append(f"Missing expected actor names: {', '.join(missing_actor_names)}")
+    if missing_actor_classes:
+        errors.append(f"Missing expected actor classes: {', '.join(missing_actor_classes)}")
+    if data.get("truncated") and (missing_actor_names or missing_actor_classes):
+        warnings.append("Level snapshot was truncated before all expected actors were found")
+
+    ok = bool(envelope.get("ok")) and not errors
+    return {
+        "name": name,
+        "kind": "sentinel_level_snapshot",
+        "tool": "get_level_snapshot",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": "Sentinel level snapshot passed" if ok else "; ".join(errors),
+        "errors": errors,
+        "warnings": warnings,
+        "current_map": data.get("current_map"),
+        "total_actor_count": total_actor_count,
+        "matched_actor_count": matched_actor_count,
+        "returned_actor_count": returned_actor_count,
+        "truncated": bool(data.get("truncated", False)),
+        "filters": dict(data.get("filters") or {}),
+        "expected_actor_names": expected_actor_names,
+        "missing_actor_names": missing_actor_names,
+        "expected_actor_classes": expected_actor_classes,
+        "missing_actor_classes": missing_actor_classes,
+    }
+
+
 def _blueprint_gate(
     connection_factory: Callable[[], Any],
     gate_config: Dict[str, Any],
@@ -1683,6 +1813,12 @@ def build_project_compatibility_gates(
         else:
             warnings.append(f"Skipping malformed sentinel_map gate: {gate_config!r}")
 
+    for index, gate_config in enumerate(compatibility_gates.get("sentinel_level_snapshots") or [], 1):
+        if isinstance(gate_config, dict):
+            gates.append(_level_snapshot_gate(connection_factory, gate_config, index=index))
+        else:
+            warnings.append(f"Skipping malformed sentinel_level_snapshot gate: {gate_config!r}")
+
     for index, gate_config in enumerate(compatibility_gates.get("sentinel_asset_searches") or [], 1):
         if isinstance(gate_config, dict):
             gates.append(_asset_search_gate(connection_factory, gate_config, index=index))
@@ -1862,6 +1998,24 @@ def register_observability_tools(mcp: FastMCP):
             category=category,
             verbosity=verbosity,
             contains=contains,
+        )
+
+    @mcp.tool()
+    def get_level_snapshot(
+        ctx: Context,
+        limit: int = 100,
+        class_name: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        include_components: bool = False,
+        component_limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Return a bounded read-only snapshot of actors in the current editor level."""
+        return build_level_snapshot(
+            limit=limit,
+            class_name=class_name,
+            name_contains=name_contains,
+            include_components=include_components,
+            component_limit=component_limit,
         )
 
     @mcp.tool()

@@ -15,7 +15,9 @@
 #include "Engine/GameViewportClient.h"
 #include "Misc/FileHelper.h"
 #include "GameFramework/Actor.h"
+#include "Engine/Level.h"
 #include "Engine/Selection.h"
+#include "Engine/World.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/App.h"
@@ -46,6 +48,117 @@ namespace
 {
     constexpr const TCHAR* UEMCPPluginVersion = TEXT("0.1.0");
     constexpr int32 MaxAutomationEventEntries = 50;
+
+    TArray<TSharedPtr<FJsonValue>> VectorToJsonArray(const FVector& Vector)
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector.X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector.Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector.Z));
+        return Values;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> RotatorToJsonArray(const FRotator& Rotator)
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator.Pitch));
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator.Yaw));
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator.Roll));
+        return Values;
+    }
+
+    FString WorldTypeToString(EWorldType::Type WorldType)
+    {
+        switch (WorldType)
+        {
+            case EWorldType::Editor:
+                return TEXT("Editor");
+            case EWorldType::PIE:
+                return TEXT("PIE");
+            case EWorldType::Game:
+                return TEXT("Game");
+            case EWorldType::GamePreview:
+                return TEXT("GamePreview");
+            case EWorldType::EditorPreview:
+                return TEXT("EditorPreview");
+            default:
+                return TEXT("Unknown");
+        }
+    }
+
+    FString CurrentMapFromWorld(UWorld* World)
+    {
+        if (!World)
+        {
+            return FString();
+        }
+        return World->GetOutermost() ? World->GetOutermost()->GetName() : World->GetMapName();
+    }
+
+    TSharedPtr<FJsonObject> ActorComponentToJson(UActorComponent* Component)
+    {
+        TSharedPtr<FJsonObject> ComponentObj = MakeShared<FJsonObject>();
+        if (!Component)
+        {
+            return ComponentObj;
+        }
+
+        UClass* ComponentClass = Component->GetClass();
+        ComponentObj->SetStringField(TEXT("name"), Component->GetName());
+        ComponentObj->SetStringField(TEXT("class"), ComponentClass ? ComponentClass->GetName() : FString());
+        ComponentObj->SetStringField(TEXT("class_path"), ComponentClass ? ComponentClass->GetPathName() : FString());
+        ComponentObj->SetStringField(TEXT("path"), Component->GetPathName());
+        ComponentObj->SetBoolField(TEXT("registered"), Component->IsRegistered());
+        return ComponentObj;
+    }
+
+    TSharedPtr<FJsonObject> ActorToLevelSnapshotJson(AActor* Actor, bool bIncludeComponents, int32 ComponentLimit)
+    {
+        TSharedPtr<FJsonObject> ActorObj = MakeShared<FJsonObject>();
+        if (!Actor)
+        {
+            return ActorObj;
+        }
+
+        UClass* ActorClass = Actor->GetClass();
+        ActorObj->SetStringField(TEXT("name"), Actor->GetName());
+        ActorObj->SetStringField(TEXT("label"), Actor->GetActorLabel());
+        ActorObj->SetStringField(TEXT("class"), ActorClass ? ActorClass->GetName() : FString());
+        ActorObj->SetStringField(TEXT("class_path"), ActorClass ? ActorClass->GetPathName() : FString());
+        ActorObj->SetStringField(TEXT("path"), Actor->GetPathName());
+        ActorObj->SetStringField(TEXT("level_name"), Actor->GetLevel() ? Actor->GetLevel()->GetName() : FString());
+        ActorObj->SetBoolField(TEXT("hidden"), Actor->IsHidden());
+        ActorObj->SetArrayField(TEXT("location"), VectorToJsonArray(Actor->GetActorLocation()));
+        ActorObj->SetArrayField(TEXT("rotation"), RotatorToJsonArray(Actor->GetActorRotation()));
+        ActorObj->SetArrayField(TEXT("scale"), VectorToJsonArray(Actor->GetActorScale3D()));
+
+        if (bIncludeComponents)
+        {
+            TArray<UActorComponent*> Components;
+            Actor->GetComponents(Components);
+
+            TArray<TSharedPtr<FJsonValue>> ComponentValues;
+            for (UActorComponent* Component : Components)
+            {
+                if (!Component)
+                {
+                    continue;
+                }
+                if (ComponentValues.Num() >= ComponentLimit)
+                {
+                    break;
+                }
+                ComponentValues.Add(MakeShared<FJsonValueObject>(ActorComponentToJson(Component)));
+            }
+
+            ActorObj->SetNumberField(TEXT("component_count"), Components.Num());
+            ActorObj->SetNumberField(TEXT("returned_component_count"), ComponentValues.Num());
+            ActorObj->SetBoolField(TEXT("components_truncated"), Components.Num() > ComponentValues.Num());
+            ActorObj->SetArrayField(TEXT("components"), ComponentValues);
+        }
+
+        return ActorObj;
+    }
 
     FString AutomationEventTypeToString(EAutomationEventType EventType)
     {
@@ -870,6 +983,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleGetOutputLog(Params);
     }
+    else if (CommandType == TEXT("get_level_snapshot"))
+    {
+        return HandleGetLevelSnapshot(Params);
+    }
     else if (CommandType == TEXT("asset_search"))
     {
         return HandleAssetSearch(Params);
@@ -1046,6 +1163,123 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetOutputLog(const TShar
     ResultObj->SetNumberField(TEXT("captured_entry_count"), OutputLogCapture.GetCapturedEntryCount());
     ResultObj->SetNumberField(TEXT("matched_entry_count"), MatchedEntryCount);
     ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+    ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetLevelSnapshot(const TSharedPtr<FJsonObject>& Params)
+{
+    UWorld* EditorWorld = nullptr;
+    if (GEditor)
+    {
+        EditorWorld = GEditor->GetEditorWorldContext().World();
+    }
+
+    if (!EditorWorld)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor world is unavailable"));
+    }
+
+    double RequestedLimit = 100.0;
+    if (Params->HasField(TEXT("limit")))
+    {
+        Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+    }
+    const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+    FString ClassName;
+    Params->TryGetStringField(TEXT("class_name"), ClassName);
+
+    FString NameContains;
+    Params->TryGetStringField(TEXT("name_contains"), NameContains);
+
+    bool bIncludeComponents = false;
+    Params->TryGetBoolField(TEXT("include_components"), bIncludeComponents);
+
+    double RequestedComponentLimit = 20.0;
+    if (Params->HasField(TEXT("component_limit")))
+    {
+        Params->TryGetNumberField(TEXT("component_limit"), RequestedComponentLimit);
+    }
+    const int32 ComponentLimit = FMath::Clamp(static_cast<int32>(RequestedComponentLimit), 1, 1000);
+
+    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+    FiltersObj->SetNumberField(TEXT("limit"), Limit);
+    if (!ClassName.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("class_name"), ClassName);
+    }
+    if (!NameContains.IsEmpty())
+    {
+        FiltersObj->SetStringField(TEXT("name_contains"), NameContains);
+    }
+    FiltersObj->SetBoolField(TEXT("include_components"), bIncludeComponents);
+    if (bIncludeComponents)
+    {
+        FiltersObj->SetNumberField(TEXT("component_limit"), ComponentLimit);
+    }
+
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(EditorWorld, AActor::StaticClass(), AllActors);
+
+    int32 TotalActorCount = 0;
+    int32 MatchedActorCount = 0;
+    TArray<TSharedPtr<FJsonValue>> ActorValues;
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor)
+        {
+            continue;
+        }
+
+        ++TotalActorCount;
+
+        UClass* ActorClass = Actor->GetClass();
+        const FString ActorClassName = ActorClass ? ActorClass->GetName() : FString();
+        const FString ActorClassPath = ActorClass ? ActorClass->GetPathName() : FString();
+        if (!ClassName.IsEmpty() &&
+            !ActorClassName.Contains(ClassName, ESearchCase::IgnoreCase) &&
+            !ActorClassPath.Contains(ClassName, ESearchCase::IgnoreCase))
+        {
+            continue;
+        }
+
+        if (!NameContains.IsEmpty() &&
+            !Actor->GetName().Contains(NameContains, ESearchCase::IgnoreCase) &&
+            !Actor->GetActorLabel().Contains(NameContains, ESearchCase::IgnoreCase))
+        {
+            continue;
+        }
+
+        ++MatchedActorCount;
+        if (ActorValues.Num() < Limit)
+        {
+            ActorValues.Add(MakeShared<FJsonValueObject>(
+                ActorToLevelSnapshotJson(Actor, bIncludeComponents, ComponentLimit)
+            ));
+        }
+    }
+
+    TSharedPtr<FJsonObject> WorldObj = MakeShared<FJsonObject>();
+    WorldObj->SetStringField(TEXT("name"), EditorWorld->GetName());
+    WorldObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(EditorWorld));
+    WorldObj->SetStringField(TEXT("world_type"), WorldTypeToString(EditorWorld->WorldType));
+    WorldObj->SetStringField(TEXT("path"), EditorWorld->GetPathName());
+
+    TArray<TSharedPtr<FJsonValue>> Warnings;
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(EditorWorld));
+    ResultObj->SetBoolField(TEXT("is_pie_running"), GEditor && GEditor->PlayWorld != nullptr);
+    ResultObj->SetNumberField(TEXT("selected_actor_count"), GEditor ? GEditor->GetSelectedActorCount() : 0);
+    ResultObj->SetObjectField(TEXT("world"), WorldObj);
+    ResultObj->SetNumberField(TEXT("total_actor_count"), TotalActorCount);
+    ResultObj->SetNumberField(TEXT("matched_actor_count"), MatchedActorCount);
+    ResultObj->SetNumberField(TEXT("returned_actor_count"), ActorValues.Num());
+    ResultObj->SetBoolField(TEXT("truncated"), MatchedActorCount > ActorValues.Num());
+    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+    ResultObj->SetArrayField(TEXT("actors"), ActorValues);
     ResultObj->SetArrayField(TEXT("warnings"), Warnings);
 
     return ResultObj;
