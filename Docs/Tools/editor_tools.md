@@ -8,6 +8,26 @@ Editor tools allow you to control the Unreal Editor viewport and other editor fu
 
 ## Editor Tools
 
+### save_current_level
+
+Save the current editor level through Unreal's editor save API.
+
+**Parameters:**
+- `only_if_dirty` (boolean, optional) - Skip the save call when the current level package is not dirty, defaults to true
+
+**Returns:**
+- Current map, package name, previous dirty state, whether a save occurred, and dirty state after the save
+
+**Example:**
+```json
+{
+  "command": "save_current_level",
+  "params": {
+    "only_if_dirty": true
+  }
+}
+```
+
 ### focus_viewport
 
 Focus the viewport on a specific actor or location.
@@ -89,6 +109,10 @@ print(focus_response)
 # Take a screenshot
 screenshot_response = unreal.send_command("take_screenshot", {"filename": "my_scene.png"})
 print(screenshot_response)
+
+# Save current level after explicit editor-backed mutations
+save_response = unreal.send_command("save_current_level", {"only_if_dirty": true})
+print(save_response)
 ```
 
 ## Troubleshooting

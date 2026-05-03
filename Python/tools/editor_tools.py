@@ -369,4 +369,33 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def save_current_level(ctx: Context, only_if_dirty: bool = True) -> Dict[str, Any]:
+        """Save the current editor level through Unreal's editor save API.
+
+        Args:
+            ctx: The MCP context
+            only_if_dirty: Skip the save call when the current level package is not dirty
+
+        Returns:
+            Dict containing the current map, package name, dirty state, and save result
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("save_current_level", {
+                "only_if_dirty": bool(only_if_dirty)
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error saving current level: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Editor tools registered successfully")

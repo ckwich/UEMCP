@@ -36,7 +36,8 @@
       "delete_actor",
       "set_actor_transform",
       "set_actor_property",
-      "spawn_blueprint_actor"
+      "spawn_blueprint_actor",
+      "save_current_level"
     ],
     "blueprint_asset_mutation": [
       "create_blueprint",
@@ -295,6 +296,14 @@
       "bridge_command": true,
       "requires_explicit_user_intent": true,
       "recommended_use": "Spawn a Blueprint actor into the level; verify the asset path and map first."
+    },
+    "save_current_level": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Persist current editor-level changes through Unreal's editor save API after snapshot validation."
     },
     "create_blueprint": {
       "category": "blueprint_asset_mutation",

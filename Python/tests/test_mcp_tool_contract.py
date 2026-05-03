@@ -65,3 +65,39 @@ def test_spawn_blueprint_actor_bridge_accepts_long_package_paths():
 
     assert 'BlueprintReference.StartsWith(TEXT("/"))' in source
     assert "must reside under /Game/Blueprints" not in source
+
+
+def test_save_current_level_is_exposed_for_persistent_editor_workflows():
+    schema = _tool_schema("save_current_level")
+
+    properties = schema.get("properties") or {}
+    assert set(properties) == {"only_if_dirty"}
+    assert "only_if_dirty" not in (schema.get("required") or [])
+
+
+def test_save_current_level_bridge_uses_editor_save_api():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+    editor_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPEditorCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'CommandType == TEXT("save_current_level")' in bridge_source
+    assert "FEditorFileUtils::SaveLevel" in editor_source

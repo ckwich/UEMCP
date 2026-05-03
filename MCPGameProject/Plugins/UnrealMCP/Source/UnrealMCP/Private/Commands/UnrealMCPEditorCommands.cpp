@@ -42,6 +42,7 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "FileHelpers.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -1048,6 +1049,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("spawn_blueprint_actor"))
     {
         return HandleSpawnBlueprintActor(Params);
+    }
+    else if (CommandType == TEXT("save_current_level"))
+    {
+        return HandleSaveCurrentLevel(Params);
     }
     // Editor viewport commands
     else if (CommandType == TEXT("focus_viewport"))
@@ -2168,6 +2173,69 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
     }
 
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to spawn blueprint actor"));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSaveCurrentLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor is not available"));
+    }
+
+    if (GEditor->PlayWorld != nullptr)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Cannot save current level while PIE is running"));
+    }
+
+    UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+    if (!EditorWorld)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+    }
+
+    ULevel* CurrentLevel = EditorWorld->PersistentLevel;
+    if (!CurrentLevel)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get current level"));
+    }
+
+    UPackage* LevelPackage = CurrentLevel->GetOutermost();
+    const FString CurrentMap = EditorWorld->GetOutermost()
+        ? EditorWorld->GetOutermost()->GetName()
+        : EditorWorld->GetMapName();
+    const FString PackageName = LevelPackage ? LevelPackage->GetName() : CurrentMap;
+
+    bool bOnlyIfDirty = true;
+    if (Params.IsValid())
+    {
+        Params->TryGetBoolField(TEXT("only_if_dirty"), bOnlyIfDirty);
+    }
+
+    const bool bWasDirty = LevelPackage && LevelPackage->IsDirty();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("current_map"), CurrentMap);
+    ResultObj->SetStringField(TEXT("package_name"), PackageName);
+    ResultObj->SetBoolField(TEXT("only_if_dirty"), bOnlyIfDirty);
+    ResultObj->SetBoolField(TEXT("was_dirty"), bWasDirty);
+
+    if (bOnlyIfDirty && !bWasDirty)
+    {
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetBoolField(TEXT("is_dirty_after_save"), false);
+        ResultObj->SetStringField(TEXT("reason"), TEXT("current_level_not_dirty"));
+        return ResultObj;
+    }
+
+    const bool bSaved = FEditorFileUtils::SaveLevel(CurrentLevel);
+    if (!bSaved)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to save current level: %s"), *PackageName));
+    }
+
+    ResultObj->SetBoolField(TEXT("saved"), true);
+    ResultObj->SetBoolField(TEXT("is_dirty_after_save"), LevelPackage && LevelPackage->IsDirty());
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFocusViewport(const TSharedPtr<FJsonObject>& Params)
