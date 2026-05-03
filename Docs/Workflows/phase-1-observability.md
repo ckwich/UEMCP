@@ -93,6 +93,23 @@ machinery lives in UEMCP; concrete Failstate recipes belong either in
 Failstate's repo or in ignored `.uemcp.local` files until they are ready to
 publish as examples.
 
+## Project Pack Boundary
+
+Phase 5 moves real project contracts into project-owned packs. For Failstate,
+the active pack lives under:
+
+```text
+C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP
+```
+
+The smoke script auto-detects `Tools\UEMCP\profiles` next to an external
+`.uproject` and sets `UEMCP_PROFILE_DIR` for the probe process. This lets
+UEMCP stay shareable while Failstate owns its sentinel assets, maps, automation
+prefixes, and capability expectations.
+
+For the Phase 5 contract, see
+[Phase 5 Project Pack Boundary](phase-5-project-pack-boundary.md).
+
 ## Verification Commands
 
 Python/static gates:
@@ -116,6 +133,7 @@ Failstate live smoke:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
   -CloseLaunchedEditor
 ```
 

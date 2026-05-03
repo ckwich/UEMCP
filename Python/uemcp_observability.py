@@ -242,7 +242,7 @@ def load_profile(
     return profile
 
 
-def get_failstate_context_data(
+def get_project_context_data(
     profile_name: str = DEFAULT_PROFILE,
     *,
     include_local: bool = True,
@@ -271,3 +271,11 @@ def get_failstate_context_data(
         "read_only": True,
         "warnings": warnings,
     }
+
+
+def get_failstate_context_data(
+    profile_name: str = DEFAULT_PROFILE,
+    *,
+    include_local: bool = True,
+) -> Dict[str, Any]:
+    return get_project_context_data(profile_name, include_local=include_local)

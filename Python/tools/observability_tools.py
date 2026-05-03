@@ -17,6 +17,7 @@ from uemcp_observability import (
     execute_bridge_command,
     format_timestamp,
     get_failstate_context_data,
+    get_project_context_data,
     server_metadata,
     utc_now,
 )
@@ -1283,14 +1284,29 @@ def build_profile_automation_run(
     )
 
 
+def build_project_context(profile_name: str = "failstate") -> Dict[str, Any]:
+    started_at = utc_now()
+    context = get_project_context_data(profile_name)
+    return build_success_envelope(
+        tool="get_project_context",
+        started_at=started_at,
+        data=context,
+        warnings=context["warnings"],
+    )
+
+
 def build_failstate_context(profile_name: str = "failstate") -> Dict[str, Any]:
     started_at = utc_now()
     context = get_failstate_context_data(profile_name)
+    warnings = list(context["warnings"])
+    warnings.append(
+        "get_failstate_context is retained for compatibility; prefer get_project_context."
+    )
     return build_success_envelope(
         tool="get_failstate_context",
         started_at=started_at,
         data=context,
-        warnings=context["warnings"],
+        warnings=warnings,
     )
 
 
@@ -1505,8 +1521,13 @@ def register_observability_tools(mcp: FastMCP):
         )
 
     @mcp.tool()
+    def get_project_context(ctx: Context, profile_name: str = "failstate") -> Dict[str, Any]:
+        """Return the active project profile without mutating Unreal state."""
+        return build_project_context(profile_name)
+
+    @mcp.tool()
     def get_failstate_context(ctx: Context, profile_name: str = "failstate") -> Dict[str, Any]:
-        """Return the active Failstate observability profile without mutating Unreal state."""
+        """Compatibility alias for get_project_context."""
         return build_failstate_context(profile_name)
 
     logger.info("Observability tools registered successfully")

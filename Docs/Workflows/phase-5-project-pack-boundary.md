@@ -1,0 +1,77 @@
+# Phase 5 Project Pack Boundary
+
+Phase 5 keeps UEMCP shareable while letting real projects such as Failstate own their compatibility contracts.
+
+## Goal
+
+UEMCP owns generic Unreal observations and validation primitives. Consuming projects own project-specific profiles, sentinel assets, maps, automation prefixes, and workflow gates.
+
+## Boundary
+
+- Generic UEMCP tools stay in this repo.
+- Project-specific contracts live in the consuming project under `Tools/UEMCP`.
+- Local machine-only overrides can still live in ignored `.uemcp.local` files.
+- UEMCP scripts should prefer `UEMCP_PROFILE_DIR` and project-owned packs over repo-local private profiles.
+
+## Project Pack Shape
+
+A project pack starts with:
+
+```text
+Tools/
+  UEMCP/
+    README.md
+    profiles/
+      <profile>.json
+    gates/
+      <gate>.json
+```
+
+The profile names content roots, automation prefixes, log categories, known maps, required UEMCP capabilities, and sentinel compatibility gates. The gate file names the project path, plugin path, and the exact smoke command for that project.
+
+## Failstate Current Pack
+
+The active Failstate Phase 1 combat shell worktree owns:
+
+```text
+C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP
+```
+
+The current sentinels prove:
+
+- `Content/Failstate/Blueprints/Blockout` resolves through Asset Registry.
+- `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly` are discoverable.
+- `/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover` resolves through `blueprint_query`.
+- `BP_FSBlockoutCover` reports generated class `BP_FSBlockoutCover_C` and parent class `FSBlockoutPiece`.
+- `Failstate.Phase1` automation tests are discoverable and runnable.
+
+## Growth Rule
+
+When Failstate adds or materially changes a system, update the Failstate pack in the same slice. Add the smallest useful sentinel proof instead of exhaustive asset lists.
+
+Examples:
+
+- A new enemy family adds one representative enemy Blueprint sentinel.
+- A new ability system slice adds one representative Ability/Data Asset sentinel and automation prefix.
+- A new map flow adds one map readiness sentinel.
+- A renamed base class updates expected parent/generated-class contracts.
+
+If UEMCP lacks a generic tool needed by a project sentinel, add the generic tool to UEMCP first, then consume it from the project pack.
+
+## Validation
+
+UEMCP sample smoke remains the public neutral gate:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
+```
+
+Failstate pack smoke uses the project-owned profile directory:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+  -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
+  -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
+  -CloseLaunchedEditor
+```

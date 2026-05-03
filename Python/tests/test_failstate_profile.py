@@ -30,6 +30,14 @@ def test_load_profile_prefers_environment_profile_dir(monkeypatch, tmp_path):
                 "automation_test_prefixes": ["Failstate.Local"],
                 "log_categories": ["LogFailstate"],
                 "known_maps": ["/Game/Failstate/Maps/Local"],
+                "compatibility_gates": {
+                    "sentinel_blueprints": [
+                        {
+                            "asset_path": "/Game/Failstate/Blueprints/Local",
+                            "expected_parent_class": "FSLocalActor",
+                        }
+                    ]
+                },
                 "notes": ["local override"],
             }
         ),
@@ -41,6 +49,7 @@ def test_load_profile_prefers_environment_profile_dir(monkeypatch, tmp_path):
 
     assert profile["project_path"] == "E:/Games/Failstate"
     assert profile["automation_test_prefixes"] == ["Failstate.Local"]
+    assert profile["compatibility_gates"]["sentinel_blueprints"][0]["expected_parent_class"] == "FSLocalActor"
 
 
 def test_failstate_context_reports_profile_source_from_environment(monkeypatch, tmp_path):

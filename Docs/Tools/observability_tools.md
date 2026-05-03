@@ -339,9 +339,21 @@ This keeps the failed gate attached to the high-level command instead of relying
 
 This tool is intentionally a Python composition of `get_editor_readiness`, `list_automation_tests`, `run_automation_test`, and `get_output_log`; it does not add a new Unreal mutation path.
 
+## get_project_context
+
+Returns the active project profile without touching Unreal state. The default profile name remains `failstate` for compatibility, but the tool is project-neutral. Profile lookup order is:
+
+1. `UEMCP_PROFILE_DIR/<profile>.json`
+2. `.uemcp.local/profiles/<profile>.json`
+3. `Python/profiles/<profile>.json`
+
+The response includes `active_profile`, `profile`, `profile_source`, `read_only`, and profile warnings. Project-specific paths, maps, sentinel assets, and workflow gates should live in the consuming project's UEMCP pack, not in UEMCP core.
+
 ## get_failstate_context
 
-Returns the active Failstate profile without touching Unreal state. The default profile targets:
+Compatibility alias for `get_project_context`. New workflows should call `get_project_context`.
+
+The packaged shareable Failstate example still describes:
 
 - `C:/Dev/Failstate`
 - `C:/Dev/Failstate/.worktrees/phase1-combat-shell`
@@ -369,6 +381,7 @@ To prove the same read-only gate against Failstate without copying plugin files 
 powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
+  -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
   -CloseLaunchedEditor
 ```
 

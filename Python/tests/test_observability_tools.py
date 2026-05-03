@@ -13,6 +13,7 @@ from tools.observability_tools import (
     build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
+    build_project_context,
     build_uemcp_ping,
     clear_observability_history,
     register_observability_tools,
@@ -646,6 +647,7 @@ def test_register_observability_tools_exposes_asset_registry_relationship_tools(
     assert "asset_dependencies" in recorder.tools
     assert "asset_referencers" in recorder.tools
     assert "blueprint_query" in recorder.tools
+    assert "get_project_context" in recorder.tools
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
@@ -1465,5 +1467,14 @@ def test_build_failstate_context_returns_profile_envelope():
 
     assert envelope["ok"] is True
     assert envelope["tool"] == "get_failstate_context"
+    assert envelope["data"]["active_profile"] == "failstate"
+    assert envelope["data"]["read_only"] is True
+
+
+def test_build_project_context_returns_profile_envelope():
+    envelope = build_project_context(profile_name="failstate")
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "get_project_context"
     assert envelope["data"]["active_profile"] == "failstate"
     assert envelope["data"]["read_only"] is True

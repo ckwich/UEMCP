@@ -2,6 +2,8 @@ param(
     [string]$UeRoot = $env:UEMCP_UE_ROOT,
     [string]$ProjectPath,
     [string]$PluginPath,
+    [string]$ProfileName = $env:UEMCP_PROFILE_NAME,
+    [string]$ProfileDir = $env:UEMCP_PROFILE_DIR,
     [int]$Port = 55557,
     [int]$StartupTimeoutSeconds = 300,
     [switch]$SkipBuild,
@@ -45,6 +47,11 @@ foreach ($PathToCheck in @($EditorPath, $BuildPath, $ProjectPath, $PythonDir)) {
 $ResolvedProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
 $ResolvedDefaultProjectPath = (Resolve-Path -LiteralPath $DefaultProjectPath).Path
 $ResolvedPluginPath = $null
+$ResolvedProfileDir = $null
+
+if (-not $ProfileName) {
+    $ProfileName = "failstate"
+}
 
 if ($PluginPath) {
     if (-not (Test-Path -LiteralPath $PluginPath -PathType Leaf)) {
@@ -59,6 +66,22 @@ if (-not $ResolvedPluginPath) {
     if (-not (Test-Path -LiteralPath $ProjectPluginPath -PathType Leaf) -and $ResolvedProjectPath -ne $ResolvedDefaultProjectPath) {
         throw "UEMCP plugin is not attached to this project. Pass -PluginPath '$DefaultPluginPath' to launch the repo plugin through Unreal's -PLUGIN switch, or install UnrealMCP under the project's Plugins folder."
     }
+}
+
+if (-not $ProfileDir) {
+    $ProjectRoot = Split-Path -Parent $ResolvedProjectPath
+    $ProjectPackProfileDir = Join-Path $ProjectRoot "Tools\UEMCP\profiles"
+    if (Test-Path -LiteralPath $ProjectPackProfileDir -PathType Container) {
+        $ProfileDir = $ProjectPackProfileDir
+    }
+}
+
+if ($ProfileDir) {
+    if (-not (Test-Path -LiteralPath $ProfileDir -PathType Container)) {
+        throw "Profile directory not found: $ProfileDir"
+    }
+
+    $ResolvedProfileDir = (Resolve-Path -LiteralPath $ProfileDir).Path
 }
 
 function Get-UemcpBridgeListener {
@@ -87,7 +110,15 @@ if (-not $SkipBuild) {
 }
 
 $LaunchedEditor = $null
+$PreviousProfileDir = $env:UEMCP_PROFILE_DIR
+$PreviousProfileName = $env:UEMCP_PROFILE_NAME
 try {
+    if ($ResolvedProfileDir) {
+        Write-Output "Using UEMCP project profile directory: $ResolvedProfileDir"
+        $env:UEMCP_PROFILE_DIR = $ResolvedProfileDir
+    }
+    $env:UEMCP_PROFILE_NAME = $ProfileName
+
     if (-not (Get-UemcpBridgeListener)) {
         if ($SkipLaunch) {
             throw "UEMCP bridge is not listening on 127.0.0.1:$Port and -SkipLaunch was passed."
@@ -145,11 +176,11 @@ from tools.observability_tools import (
     build_editor_automation_readiness_diagnostic,
     build_editor_readiness,
     build_editor_status,
-    build_failstate_context,
     build_observability_recent_events,
     build_observability_state_summary,
     build_output_log,
     build_profile_automation_run,
+    build_project_context,
     build_uemcp_ping,
 )
 
@@ -159,6 +190,7 @@ def normalize_path(value: str) -> str:
 
 
 expected_project = normalize_path(os.environ["UEMCP_SMOKE_EXPECTED_PROJECT"])
+profile_name = os.environ.get("UEMCP_PROFILE_NAME", "failstate")
 is_failstate_project = "/failstate/" in expected_project or expected_project.endswith("/failstate.uproject")
 
 
@@ -174,7 +206,7 @@ checks.append(
         build_output_log(limit=10, category="LogTemp", contains="get_output_log"),
     )
 )
-checks.append(("get_failstate_context", build_failstate_context()))
+checks.append(("get_project_context", build_project_context(profile_name=profile_name)))
 checks.append(
     (
         "diagnose_editor_automation_readiness",
@@ -211,6 +243,7 @@ checks.append(
     (
         "run_profile_automation_uemcp_smoke",
         build_profile_automation_run(
+            profile_name=profile_name,
             test_name="UEMCP.Observability.Smoke",
             timeout_seconds=30,
             output_log_limit=5,
@@ -283,7 +316,7 @@ if is_failstate_project:
         (
             "run_profile_automation_failstate_prefix",
             build_profile_automation_run(
-                profile_name="failstate",
+                profile_name=profile_name,
                 prefix="Failstate.Phase1",
                 limit=10,
                 timeout_seconds=30,
@@ -315,6 +348,14 @@ if actual_project != expected_project:
     failures.append(
         "get_editor_status returned project_path "
         f"{status.get('project_path')!r}, expected {expected_project!r}"
+    )
+
+project_context = dict(check_results["get_project_context"].get("data") or {})
+profile_source = dict(project_context.get("profile_source") or {})
+if is_failstate_project and profile_source.get("kind") != "environment":
+    failures.append(
+        "Failstate smoke did not load the project-owned UEMCP profile pack: "
+        f"{profile_source}"
     )
 
 output_log = dict(check_results["get_output_log"].get("data") or {})
@@ -689,6 +730,9 @@ print("SMOKE_OK")
     }
 }
 finally {
+    $env:UEMCP_PROFILE_DIR = $PreviousProfileDir
+    $env:UEMCP_PROFILE_NAME = $PreviousProfileName
+
     if ($CloseLaunchedEditor -and $LaunchedEditor -and -not $LaunchedEditor.HasExited) {
         Write-Output "Closing launched Unreal Editor PID $($LaunchedEditor.Id)."
         Stop-Process -Id $LaunchedEditor.Id
