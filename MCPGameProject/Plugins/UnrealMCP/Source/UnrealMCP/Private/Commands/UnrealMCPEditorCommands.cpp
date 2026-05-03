@@ -3,6 +3,7 @@
 #include "Observability/UEMCPOutputLogCapture.h"
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetIdentifier.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Editor.h"
@@ -21,6 +22,7 @@
 #include "Misc/AutomationEvent.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -182,6 +184,44 @@ namespace
         return TEXT("/Game/") + Root;
     }
 
+    FString NormalizeAssetPackageName(const FString& RawAssetPath)
+    {
+        FString AssetPath = RawAssetPath.TrimStartAndEnd();
+        AssetPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+        AssetPath = TrimTrailingSlashes(AssetPath);
+
+        if (AssetPath.IsEmpty())
+        {
+            return FString();
+        }
+
+        FString LongPackageName;
+        if ((AssetPath.EndsWith(TEXT(".uasset"), ESearchCase::IgnoreCase) ||
+             AssetPath.EndsWith(TEXT(".umap"), ESearchCase::IgnoreCase)) &&
+            FPackageName::TryConvertFilenameToLongPackageName(AssetPath, LongPackageName))
+        {
+            return LongPackageName;
+        }
+
+        const int32 ValueIndex = AssetPath.Find(
+            TEXT("::"),
+            ESearchCase::CaseSensitive,
+            ESearchDir::FromStart
+        );
+        if (ValueIndex != INDEX_NONE)
+        {
+            AssetPath.LeftInline(ValueIndex);
+        }
+
+        int32 ObjectDelimiterIndex = INDEX_NONE;
+        if (AssetPath.FindChar(TEXT('.'), ObjectDelimiterIndex))
+        {
+            AssetPath.LeftInline(ObjectDelimiterIndex);
+        }
+
+        return TrimTrailingSlashes(NormalizeAssetRoot(AssetPath));
+    }
+
     FString AssetClassShortName(const FString& AssetClassPath)
     {
         FString ShortName = AssetClassPath;
@@ -232,6 +272,339 @@ namespace
         AssetObj->SetStringField(TEXT("asset_class_path"), AssetClassPath);
         return AssetObj;
     }
+
+    FString DependencyCategoryToString(UE::AssetRegistry::EDependencyCategory Category)
+    {
+        if (Category == UE::AssetRegistry::EDependencyCategory::Package)
+        {
+            return TEXT("Package");
+        }
+        if (Category == UE::AssetRegistry::EDependencyCategory::SearchableName)
+        {
+            return TEXT("SearchableName");
+        }
+        if (Category == UE::AssetRegistry::EDependencyCategory::Manage)
+        {
+            return TEXT("Manage");
+        }
+        if (Category == UE::AssetRegistry::EDependencyCategory::None)
+        {
+            return TEXT("None");
+        }
+        return TEXT("Mixed");
+    }
+
+    void AddDependencyPropertyName(
+        TArray<TSharedPtr<FJsonValue>>& Properties,
+        UE::AssetRegistry::EDependencyProperty AllProperties,
+        UE::AssetRegistry::EDependencyProperty Property,
+        const TCHAR* PropertyName
+    )
+    {
+        if (EnumHasAnyFlags(AllProperties, Property))
+        {
+            Properties.Add(MakeShared<FJsonValueString>(PropertyName));
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> DependencyPropertiesToJson(
+        UE::AssetRegistry::EDependencyProperty Properties
+    )
+    {
+        TArray<TSharedPtr<FJsonValue>> PropertyNames;
+        AddDependencyPropertyName(
+            PropertyNames,
+            Properties,
+            UE::AssetRegistry::EDependencyProperty::Hard,
+            TEXT("Hard")
+        );
+        AddDependencyPropertyName(
+            PropertyNames,
+            Properties,
+            UE::AssetRegistry::EDependencyProperty::Game,
+            TEXT("Game")
+        );
+        AddDependencyPropertyName(
+            PropertyNames,
+            Properties,
+            UE::AssetRegistry::EDependencyProperty::Build,
+            TEXT("Build")
+        );
+        AddDependencyPropertyName(
+            PropertyNames,
+            Properties,
+            UE::AssetRegistry::EDependencyProperty::Direct,
+            TEXT("Direct")
+        );
+        AddDependencyPropertyName(
+            PropertyNames,
+            Properties,
+            UE::AssetRegistry::EDependencyProperty::CookRule,
+            TEXT("CookRule")
+        );
+        return PropertyNames;
+    }
+
+    UE::AssetRegistry::FDependencyQuery BuildPackageDependencyQuery(
+        bool bIncludeHard,
+        bool bIncludeSoft
+    )
+    {
+        UE::AssetRegistry::FDependencyQuery Query;
+        if (bIncludeHard && !bIncludeSoft)
+        {
+            Query.Required |= UE::AssetRegistry::EDependencyProperty::Hard;
+        }
+        else if (!bIncludeHard && bIncludeSoft)
+        {
+            Query.Excluded |= UE::AssetRegistry::EDependencyProperty::Hard;
+        }
+        return Query;
+    }
+
+    bool TryGetFirstAssetDataForPackage(
+        IAssetRegistry& AssetRegistry,
+        FName PackageName,
+        FAssetData& OutAssetData,
+        int32& OutAssetCount
+    )
+    {
+        TArray<FAssetData> AssetDataList;
+        AssetRegistry.GetAssetsByPackageName(PackageName, AssetDataList, false, false);
+        AssetDataList.Sort([](const FAssetData& Left, const FAssetData& Right)
+        {
+            return Left.GetObjectPathString() < Right.GetObjectPathString();
+        });
+
+        OutAssetCount = AssetDataList.Num();
+        if (AssetDataList.IsEmpty())
+        {
+            return false;
+        }
+
+        OutAssetData = AssetDataList[0];
+        return true;
+    }
+
+    TSharedPtr<FJsonObject> AssetDependencyToJson(
+        const FAssetDependency& Dependency,
+        IAssetRegistry& AssetRegistry
+    )
+    {
+        const FAssetIdentifier& AssetId = Dependency.AssetId;
+        const bool bHard = EnumHasAnyFlags(
+            Dependency.Properties,
+            UE::AssetRegistry::EDependencyProperty::Hard
+        );
+        const bool bGame = EnumHasAnyFlags(
+            Dependency.Properties,
+            UE::AssetRegistry::EDependencyProperty::Game
+        );
+
+        TSharedPtr<FJsonObject> DependencyObj = MakeShared<FJsonObject>();
+        DependencyObj->SetStringField(TEXT("identifier"), AssetId.ToString());
+        DependencyObj->SetStringField(TEXT("category"), DependencyCategoryToString(Dependency.Category));
+        DependencyObj->SetArrayField(
+            TEXT("properties"),
+            DependencyPropertiesToJson(Dependency.Properties)
+        );
+        DependencyObj->SetBoolField(TEXT("hard"), bHard);
+        DependencyObj->SetBoolField(TEXT("soft"), !bHard);
+        DependencyObj->SetBoolField(TEXT("game"), bGame);
+        DependencyObj->SetBoolField(TEXT("editor_only"), !bGame);
+
+        if (AssetId.PackageName != NAME_None)
+        {
+            const FString PackageName = AssetId.PackageName.ToString();
+            DependencyObj->SetStringField(TEXT("package_name"), PackageName);
+            DependencyObj->SetStringField(TEXT("package_path"), FPackageName::GetLongPackagePath(PackageName));
+        }
+        if (AssetId.ObjectName != NAME_None)
+        {
+            DependencyObj->SetStringField(TEXT("object_name"), AssetId.ObjectName.ToString());
+        }
+        if (AssetId.ValueName != NAME_None)
+        {
+            DependencyObj->SetStringField(TEXT("value_name"), AssetId.ValueName.ToString());
+        }
+        if (AssetId.GetPrimaryAssetId().IsValid())
+        {
+            DependencyObj->SetStringField(TEXT("primary_asset_id"), AssetId.GetPrimaryAssetId().ToString());
+        }
+
+        if (AssetId.PackageName != NAME_None)
+        {
+            FAssetData RelatedAssetData;
+            int32 RelatedAssetCount = 0;
+            const bool bFoundAssetData = TryGetFirstAssetDataForPackage(
+                AssetRegistry,
+                AssetId.PackageName,
+                RelatedAssetData,
+                RelatedAssetCount
+            );
+            DependencyObj->SetBoolField(TEXT("asset_found"), bFoundAssetData);
+            DependencyObj->SetNumberField(TEXT("asset_count"), RelatedAssetCount);
+            if (bFoundAssetData)
+            {
+                DependencyObj->SetObjectField(TEXT("asset"), AssetDataToJson(RelatedAssetData));
+                DependencyObj->SetStringField(TEXT("asset_name"), RelatedAssetData.AssetName.ToString());
+                DependencyObj->SetStringField(TEXT("object_path"), RelatedAssetData.GetObjectPathString());
+                DependencyObj->SetStringField(
+                    TEXT("asset_class"),
+                    AssetClassShortName(RelatedAssetData.AssetClassPath.ToString())
+                );
+                DependencyObj->SetStringField(
+                    TEXT("asset_class_path"),
+                    RelatedAssetData.AssetClassPath.ToString()
+                );
+            }
+        }
+
+        return DependencyObj;
+    }
+
+    TSharedPtr<FJsonObject> HandleAssetRelationshipQuery(
+        const TSharedPtr<FJsonObject>& Params,
+        bool bReferencers
+    )
+    {
+        double RequestedLimit = 100.0;
+        if (Params->HasField(TEXT("limit")))
+        {
+            Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+        }
+        const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+        FString AssetPath;
+        Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+        const FString PackageNameString = NormalizeAssetPackageName(AssetPath);
+        if (PackageNameString.IsEmpty())
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(
+                TEXT("Missing required asset_path for Asset Registry relationship query")
+            );
+        }
+
+        bool bIncludeHard = true;
+        if (Params->HasField(TEXT("include_hard")))
+        {
+            Params->TryGetBoolField(TEXT("include_hard"), bIncludeHard);
+        }
+        bool bIncludeSoft = true;
+        if (Params->HasField(TEXT("include_soft")))
+        {
+            Params->TryGetBoolField(TEXT("include_soft"), bIncludeSoft);
+        }
+
+        IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+            TEXT("AssetRegistry")
+        ).Get();
+
+        const FName PackageName(*PackageNameString);
+        FAssetData SourceAssetData;
+        int32 SourceAssetCount = 0;
+        const bool bFoundSourceAsset = TryGetFirstAssetDataForPackage(
+            AssetRegistry,
+            PackageName,
+            SourceAssetData,
+            SourceAssetCount
+        );
+
+        TArray<FAssetDependency> Relationships;
+        bool bQuerySucceeded = true;
+        if (bIncludeHard || bIncludeSoft)
+        {
+            const UE::AssetRegistry::FDependencyQuery Query = BuildPackageDependencyQuery(
+                bIncludeHard,
+                bIncludeSoft
+            );
+            if (bReferencers)
+            {
+                bQuerySucceeded = AssetRegistry.GetReferencers(
+                    FAssetIdentifier(PackageName),
+                    Relationships,
+                    UE::AssetRegistry::EDependencyCategory::Package,
+                    Query
+                );
+            }
+            else
+            {
+                bQuerySucceeded = AssetRegistry.GetDependencies(
+                    FAssetIdentifier(PackageName),
+                    Relationships,
+                    UE::AssetRegistry::EDependencyCategory::Package,
+                    Query
+                );
+            }
+        }
+
+        Relationships.Sort([](const FAssetDependency& Left, const FAssetDependency& Right)
+        {
+            return Left.LexicalLess(Right);
+        });
+
+        TArray<TSharedPtr<FJsonValue>> RelationshipValues;
+        RelationshipValues.Reserve(FMath::Min(Limit, Relationships.Num()));
+        for (const FAssetDependency& Relationship : Relationships)
+        {
+            if (RelationshipValues.Num() >= Limit)
+            {
+                break;
+            }
+            RelationshipValues.Add(MakeShared<FJsonValueObject>(
+                AssetDependencyToJson(Relationship, AssetRegistry)
+            ));
+        }
+
+        TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+        FiltersObj->SetNumberField(TEXT("limit"), Limit);
+        FiltersObj->SetStringField(TEXT("asset_path"), AssetPath);
+        FiltersObj->SetStringField(TEXT("package_name"), PackageNameString);
+        FiltersObj->SetBoolField(TEXT("include_hard"), bIncludeHard);
+        FiltersObj->SetBoolField(TEXT("include_soft"), bIncludeSoft);
+
+        TArray<TSharedPtr<FJsonValue>> Warnings;
+        if (AssetRegistry.IsLoadingAssets())
+        {
+            Warnings.Add(MakeShared<FJsonValueString>(
+                TEXT("Asset Registry is still loading assets; relationship results may be incomplete")
+            ));
+        }
+        if (!bFoundSourceAsset)
+        {
+            Warnings.Add(MakeShared<FJsonValueString>(
+                TEXT("No Asset Registry asset data was found for the requested package")
+            ));
+        }
+
+        const TCHAR* RelationshipArrayName = bReferencers ? TEXT("referencers") : TEXT("dependencies");
+        const TCHAR* MatchedCountName = bReferencers
+            ? TEXT("matched_referencer_count")
+            : TEXT("matched_dependency_count");
+        const TCHAR* ReturnedCountName = bReferencers
+            ? TEXT("returned_referencer_count")
+            : TEXT("returned_dependency_count");
+
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+        ResultObj->SetStringField(TEXT("package_name"), PackageNameString);
+        ResultObj->SetBoolField(TEXT("asset_found"), bFoundSourceAsset);
+        ResultObj->SetNumberField(TEXT("source_asset_count"), SourceAssetCount);
+        if (bFoundSourceAsset)
+        {
+            ResultObj->SetObjectField(TEXT("source_asset"), AssetDataToJson(SourceAssetData));
+        }
+        ResultObj->SetArrayField(RelationshipArrayName, RelationshipValues);
+        ResultObj->SetNumberField(MatchedCountName, Relationships.Num());
+        ResultObj->SetNumberField(ReturnedCountName, RelationshipValues.Num());
+        ResultObj->SetBoolField(TEXT("truncated"), Relationships.Num() > RelationshipValues.Num());
+        ResultObj->SetBoolField(TEXT("query_succeeded"), bQuerySucceeded);
+        ResultObj->SetBoolField(TEXT("asset_registry_loading"), AssetRegistry.IsLoadingAssets());
+        ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+        ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+        return ResultObj;
+    }
 }
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
@@ -252,6 +625,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("asset_search"))
     {
         return HandleAssetSearch(Params);
+    }
+    else if (CommandType == TEXT("asset_dependencies"))
+    {
+        return HandleAssetDependencies(Params);
+    }
+    else if (CommandType == TEXT("asset_referencers"))
+    {
+        return HandleAssetReferencers(Params);
     }
     else if (CommandType == TEXT("list_automation_tests"))
     {
@@ -531,6 +912,16 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetSearch(const TShare
     ResultObj->SetArrayField(TEXT("warnings"), Warnings);
 
     return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetDependencies(const TSharedPtr<FJsonObject>& Params)
+{
+    return HandleAssetRelationshipQuery(Params, false);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetReferencers(const TSharedPtr<FJsonObject>& Params)
+{
+    return HandleAssetRelationshipQuery(Params, true);
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params)

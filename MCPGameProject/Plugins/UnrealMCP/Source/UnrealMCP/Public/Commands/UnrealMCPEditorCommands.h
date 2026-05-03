@@ -20,6 +20,8 @@ private:
     TSharedPtr<FJsonObject> HandleGetEditorStatus(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetOutputLog(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleAssetSearch(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetDependencies(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetReferencers(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& Params);
 

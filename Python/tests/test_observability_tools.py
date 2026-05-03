@@ -1,4 +1,6 @@
 from tools.observability_tools import (
+    build_asset_dependencies,
+    build_asset_referencers,
     build_asset_search,
     build_automation_test_run,
     build_automation_tests,
@@ -451,12 +453,99 @@ def test_build_asset_search_clamps_limit_and_skips_empty_filters():
     assert connection.calls == [("asset_search", {"limit": 1000})]
 
 
-def test_register_observability_tools_exposes_asset_search():
+def test_build_asset_dependencies_passes_bounded_query_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover.BP_FSBlockoutCover",
+                "package_name": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "dependencies": [
+                    {
+                        "identifier": "/Script/Engine",
+                        "package_name": "/Script/Engine",
+                        "category": "Package",
+                        "hard": True,
+                        "soft": False,
+                    }
+                ],
+                "matched_dependency_count": 1,
+                "returned_dependency_count": 1,
+                "truncated": False,
+            },
+        }
+    )
+
+    envelope = build_asset_dependencies(
+        lambda: connection,
+        asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover.BP_FSBlockoutCover",
+        include_hard=True,
+        include_soft=False,
+        limit=25,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "asset_dependencies"
+    assert envelope["data"]["dependencies"][0]["identifier"] == "/Script/Engine"
+    assert connection.calls == [
+        (
+            "asset_dependencies",
+            {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover.BP_FSBlockoutCover",
+                "include_hard": True,
+                "include_soft": False,
+                "limit": 25,
+            },
+        )
+    ]
+
+
+def test_build_asset_referencers_passes_bounded_query_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "package_name": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "referencers": [],
+                "matched_referencer_count": 0,
+                "returned_referencer_count": 0,
+                "truncated": False,
+            },
+        }
+    )
+
+    envelope = build_asset_referencers(
+        lambda: connection,
+        asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+        include_hard=False,
+        include_soft=True,
+        limit=5000,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "asset_referencers"
+    assert connection.calls == [
+        (
+            "asset_referencers",
+            {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "include_hard": False,
+                "include_soft": True,
+                "limit": 1000,
+            },
+        )
+    ]
+
+
+def test_register_observability_tools_exposes_asset_registry_relationship_tools():
     recorder = ToolRecorder()
 
     register_observability_tools(recorder)
 
     assert "asset_search" in recorder.tools
+    assert "asset_dependencies" in recorder.tools
+    assert "asset_referencers" in recorder.tools
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():

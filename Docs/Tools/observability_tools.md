@@ -174,6 +174,54 @@ build_asset_search(
 )
 ```
 
+## asset_dependencies
+
+Returns package dependency data for one asset from Unreal's Asset Registry without loading, saving, or mutating the asset.
+
+Parameters:
+
+- `asset_path`: required asset object path, package path, repo-style `Content/...` path, or absolute content path. Object paths such as `/Game/Foo/Bar.Bar` normalize to package name `/Game/Foo/Bar`.
+- `include_hard`: include hard package dependencies. Defaults to true.
+- `include_soft`: include soft package dependencies. Defaults to true.
+- `limit`: maximum relationships, clamped from 1 to 1000.
+
+The response includes:
+
+- `asset_path`: original request value.
+- `package_name`: normalized package name used for the Asset Registry query.
+- `asset_found` and `source_asset`: whether registry metadata was found for the requested package.
+- `dependencies`: dependency entries, sorted and bounded by `limit`.
+- `matched_dependency_count`, `returned_dependency_count`, and `truncated`.
+- `query_succeeded`, `asset_registry_loading`, `filters`, and `warnings`.
+
+Each dependency includes `identifier`, optional `package_name`, `package_path`, `object_name`, `value_name`, `primary_asset_id`, `category`, `properties`, `hard`, `soft`, `game`, `editor_only`, and related asset metadata when the target package resolves to Asset Registry asset data.
+
+For Failstate Blockout validation:
+
+```python
+build_asset_dependencies(
+    asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+    include_hard=True,
+    include_soft=True,
+    limit=50,
+)
+```
+
+## asset_referencers
+
+Returns package referencer data for one asset from Unreal's Asset Registry without loading, saving, or mutating the asset. It accepts the same parameters and returns the same normalized source fields as `asset_dependencies`, but the relationship array is `referencers` with `matched_referencer_count` and `returned_referencer_count`.
+
+For Failstate Blockout validation:
+
+```python
+build_asset_referencers(
+    asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+    include_hard=True,
+    include_soft=True,
+    limit=50,
+)
+```
+
 ## list_automation_tests
 
 Lists Unreal automation tests currently visible to the editor automation framework. The bridge calls `FAutomationTestFramework::LoadTestModules()` and `GetValidTestNames()` on the game thread, then returns a bounded, prefix-filtered result.
@@ -289,6 +337,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
+When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It then requires `asset_dependencies` and `asset_referencers` for `/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover` to normalize the package, find source asset metadata, preserve the hard/soft filters, stay within the requested limit, and return well-formed relationship entries when Unreal reports any. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

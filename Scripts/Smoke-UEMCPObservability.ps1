@@ -136,6 +136,8 @@ import sys
 from pathlib import Path
 
 from tools.observability_tools import (
+    build_asset_dependencies,
+    build_asset_referencers,
     build_asset_search,
     build_automation_test_run,
     build_automation_tests,
@@ -219,12 +221,35 @@ checks.append(
 )
 
 if is_failstate_project:
+    failstate_blockout_cover_package = "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover"
     checks.append(
         (
             "asset_search_failstate_blockout",
             build_asset_search(
                 root="Content/Failstate/Blueprints/Blockout",
                 name_contains="BP_FSBlockout",
+                limit=50,
+            ),
+        )
+    )
+    checks.append(
+        (
+            "asset_dependencies_failstate_blockout_cover",
+            build_asset_dependencies(
+                asset_path=failstate_blockout_cover_package,
+                include_hard=True,
+                include_soft=True,
+                limit=50,
+            ),
+        )
+    )
+    checks.append(
+        (
+            "asset_referencers_failstate_blockout_cover",
+            build_asset_referencers(
+                asset_path=failstate_blockout_cover_package,
+                include_hard=True,
+                include_soft=True,
                 limit=50,
             ),
         )
@@ -483,6 +508,52 @@ if is_failstate_project:
         package_path = str(asset.get("package_path") or "")
         if not package_path.startswith("/Game/Failstate/Blueprints/Blockout"):
             failures.append(f"asset_search returned outside Failstate blockout root: {asset}")
+
+    failstate_blockout_cover_package = "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover"
+    relationship_checks = (
+        (
+            "asset_dependencies_failstate_blockout_cover",
+            "dependencies",
+            "matched_dependency_count",
+            "returned_dependency_count",
+        ),
+        (
+            "asset_referencers_failstate_blockout_cover",
+            "referencers",
+            "matched_referencer_count",
+            "returned_referencer_count",
+        ),
+    )
+    for check_name, array_field, matched_count_field, returned_count_field in relationship_checks:
+        relationship_data = dict(check_results[check_name].get("data") or {})
+        relationship_filters = dict(relationship_data.get("filters") or {})
+        relationships = relationship_data.get(array_field) or []
+        if relationship_data.get("package_name") != failstate_blockout_cover_package:
+            failures.append(
+                f"{check_name} did not normalize the Blockout cover package: {relationship_data}"
+            )
+        if relationship_data.get("asset_found") is not True:
+            failures.append(f"{check_name} did not find source asset data: {relationship_data}")
+        if relationship_data.get("query_succeeded") is not True:
+            failures.append(f"{check_name} Asset Registry query did not report success: {relationship_data}")
+        if relationship_filters.get("include_hard") is not True:
+            failures.append(f"{check_name} did not include hard package relationships: {relationship_data}")
+        if relationship_filters.get("include_soft") is not True:
+            failures.append(f"{check_name} did not include soft package relationships: {relationship_data}")
+        if relationship_data.get(returned_count_field, 0) > 50:
+            failures.append(f"{check_name} returned more relationships than its limit: {relationship_data}")
+        if relationship_data.get(matched_count_field, 0) < relationship_data.get(returned_count_field, 0):
+            failures.append(f"{check_name} matched fewer relationships than it returned: {relationship_data}")
+        for relationship in relationships:
+            if not relationship.get("identifier"):
+                failures.append(f"{check_name} relationship missing identifier: {relationship}")
+            if not relationship.get("category"):
+                failures.append(f"{check_name} relationship missing category: {relationship}")
+            if "hard" not in relationship or "soft" not in relationship:
+                failures.append(f"{check_name} relationship missing hard/soft flags: {relationship}")
+            package_name = str(relationship.get("package_name") or "")
+            if package_name and not package_name.startswith("/"):
+                failures.append(f"{check_name} relationship package is not a long package name: {relationship}")
 
     failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
     returned_failstate_tests = failstate_tests.get("tests") or []

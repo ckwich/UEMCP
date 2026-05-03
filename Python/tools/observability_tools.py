@@ -766,6 +766,50 @@ def build_asset_search(
     )
 
 
+def build_asset_dependencies(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    asset_path: str,
+    include_hard: bool = True,
+    include_soft: bool = True,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    return execute_bridge_command(
+        tool="asset_dependencies",
+        command="asset_dependencies",
+        connection_factory=connection_factory,
+        params={
+            "asset_path": asset_path,
+            "include_hard": bool(include_hard),
+            "include_soft": bool(include_soft),
+            "limit": bounded_limit,
+        },
+    )
+
+
+def build_asset_referencers(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    asset_path: str,
+    include_hard: bool = True,
+    include_soft: bool = True,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    return execute_bridge_command(
+        tool="asset_referencers",
+        command="asset_referencers",
+        connection_factory=connection_factory,
+        params={
+            "asset_path": asset_path,
+            "include_hard": bool(include_hard),
+            "include_soft": bool(include_soft),
+            "limit": bounded_limit,
+        },
+    )
+
+
 def build_automation_test_run(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -1331,6 +1375,38 @@ def register_observability_tools(mcp: FastMCP):
             class_name=class_name,
             name_contains=name_contains,
             path_contains=path_contains,
+            limit=limit,
+        )
+
+    @mcp.tool()
+    def asset_dependencies(
+        ctx: Context,
+        asset_path: str,
+        include_hard: bool = True,
+        include_soft: bool = True,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Return package dependencies for one Unreal asset without loading or mutating it."""
+        return build_asset_dependencies(
+            asset_path=asset_path,
+            include_hard=include_hard,
+            include_soft=include_soft,
+            limit=limit,
+        )
+
+    @mcp.tool()
+    def asset_referencers(
+        ctx: Context,
+        asset_path: str,
+        include_hard: bool = True,
+        include_soft: bool = True,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Return package referencers for one Unreal asset without loading or mutating it."""
+        return build_asset_referencers(
+            asset_path=asset_path,
+            include_hard=include_hard,
+            include_soft=include_soft,
             limit=limit,
         )
 
