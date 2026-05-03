@@ -48,6 +48,7 @@ You should make sure you have installed dependencies and/or are running in the `
 ```bash
 uv lock --check
 uv run --extra dev pytest -q
+uv run python -m uemcp_neutrality
 uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
 ```
 

@@ -18,6 +18,7 @@ When investigating a bug, follow this process:
 - Concrete game paths, sentinel assets, maps, workflow gates, local worktrees, and compatibility expectations belong in the consuming project's UEMCP pack or ignored local profile files.
 - When Failstate needs new integration, prefer adding a generic UEMCP capability plus a Failstate-owned pack update.
 - Do not add Failstate-specific tool names, paths, maps, asset names, or assumptions to the public MCP surface.
+- Run `uv --directory Python run python -m uemcp_neutrality` before closing any slice that touches public UEMCP docs, tools, scripts, or profiles.
 
 ## Profile And Pack Lookup
 - Project profiles can be loaded from `UEMCP_PROFILE_DIR/<profile>.json`.

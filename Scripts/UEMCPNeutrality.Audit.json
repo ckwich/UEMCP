@@ -1,0 +1,83 @@
+{
+  "patterns": [
+    "Failstate",
+    "failstate",
+    "BP_FS",
+    "FSBlockout",
+    "L_CombatShell",
+    "Content/Failstate",
+    "/Game/Failstate",
+    "LogFailstate",
+    "C:/Dev/Failstate",
+    "C:\\Dev\\Failstate"
+  ],
+  "allowed_occurrences": [
+    {
+      "path": "AGENTS.md",
+      "patterns": [
+        "Failstate"
+      ],
+      "reason": "Project-pack boundary guidance may name the current consuming project."
+    },
+    {
+      "path": "Python/uemcp_observability.py",
+      "patterns": [
+        "failstate"
+      ],
+      "reason": "Compatibility default profile name only; project specifics must stay out of this module."
+    },
+    {
+      "path": "Python/tools/observability_tools.py",
+      "patterns": [
+        "failstate"
+      ],
+      "reason": "Compatibility default profile name and get_failstate_context alias only."
+    },
+    {
+      "path": "Scripts/Smoke-UEMCPObservability.ps1",
+      "patterns": [
+        "failstate"
+      ],
+      "reason": "Compatibility default profile name only; project gates must come from mounted profile packs."
+    },
+    {
+      "path": "Python/profiles/failstate.json",
+      "reason": "Packaged compatibility example profile."
+    },
+    {
+      "path_prefix": "Python/tests/",
+      "reason": "Tests may use Failstate fixtures to preserve compatibility behavior."
+    },
+    {
+      "path_prefix": "Docs/superpowers/",
+      "reason": "Historical design and plan artifacts record the original Failstate-oriented session."
+    },
+    {
+      "path": "Docs/Tools/observability_tools.md",
+      "reason": "Tool documentation may include the current compatibility example."
+    },
+    {
+      "path": "Docs/Workflows/phase-1-observability.md",
+      "reason": "Workflow documentation may include the current compatibility example."
+    },
+    {
+      "path": "Docs/Workflows/phase-5-project-pack-boundary.md",
+      "reason": "Phase 5 boundary documentation may include the current compatibility example."
+    },
+    {
+      "path": "Python/README.md",
+      "reason": "README may include the current compatibility smoke example."
+    },
+    {
+      "path": "Scripts/UEMCPNeutrality.Audit.json",
+      "reason": "The audit config must list the project-specific sentinels it guards against."
+    },
+    {
+      "path": "Python/uemcp_neutrality.py",
+      "patterns": [
+        "failstate"
+      ],
+      "reason": "The audit implementation path is allowed to mention the config filename only if needed."
+    }
+  ]
+}

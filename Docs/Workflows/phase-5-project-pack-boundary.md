@@ -69,6 +69,14 @@ If UEMCP lacks a generic tool needed by a project sentinel, add the generic tool
 
 ## Validation
 
+Run the public neutrality audit before committing UEMCP changes that touch tools, scripts, docs, or profiles:
+
+```powershell
+uv --directory Python run python -m uemcp_neutrality
+```
+
+The audit scans tracked files for project-specific strings and allows them only in explicit compatibility/example locations listed in `Scripts/UEMCPNeutrality.Audit.json`.
+
 UEMCP sample smoke remains the public neutral gate:
 
 ```powershell
