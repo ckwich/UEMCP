@@ -1,0 +1,524 @@
+{
+  "version": 1,
+  "name": "uemcp-tool-surface-audit",
+  "description": "Safety classification for the public UEMCP MCP tools and Unreal bridge commands.",
+  "tool_groups": {
+    "observability": [
+      "uemcp_ping",
+      "get_editor_status",
+      "get_editor_readiness",
+      "diagnose_editor_automation_readiness",
+      "get_observability_recent_events",
+      "summarize_observability_state",
+      "get_output_log",
+      "get_level_snapshot",
+      "asset_search",
+      "asset_dependencies",
+      "asset_referencers",
+      "blueprint_query",
+      "list_automation_tests",
+      "get_project_context",
+      "get_failstate_context"
+    ],
+    "automation": [
+      "run_automation_test",
+      "run_profile_automation_tests",
+      "run_project_compatibility_gates"
+    ],
+    "level_read": [
+      "get_actors_in_level",
+      "find_actors_by_name",
+      "get_actor_properties"
+    ],
+    "level_mutation": [
+      "spawn_actor",
+      "create_actor",
+      "delete_actor",
+      "set_actor_transform",
+      "set_actor_property",
+      "spawn_blueprint_actor"
+    ],
+    "blueprint_asset_mutation": [
+      "create_blueprint",
+      "add_component_to_blueprint",
+      "set_static_mesh_properties",
+      "set_component_property",
+      "set_physics_properties",
+      "compile_blueprint",
+      "set_blueprint_property",
+      "set_pawn_properties"
+    ],
+    "blueprint_graph_mutation": [
+      "add_blueprint_event_node",
+      "add_blueprint_input_action_node",
+      "add_blueprint_function_node",
+      "connect_blueprint_nodes",
+      "add_blueprint_variable",
+      "add_blueprint_get_self_component_reference",
+      "add_blueprint_self_reference",
+      "add_blueprint_get_component_node"
+    ],
+    "project_config_mutation": [
+      "create_input_mapping"
+    ],
+    "umg_mutation": [
+      "create_umg_widget_blueprint",
+      "add_text_block_to_widget",
+      "add_button_to_widget",
+      "bind_widget_event",
+      "set_text_block_binding"
+    ],
+    "viewport_or_file_output": [
+      "focus_viewport",
+      "take_screenshot",
+      "add_widget_to_viewport"
+    ],
+    "bridge_only": [
+      "ping",
+      "create_actor",
+      "focus_viewport",
+      "take_screenshot",
+      "set_pawn_properties",
+      "add_blueprint_get_component_node"
+    ]
+  },
+  "tools": {
+    "uemcp_ping": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "uses_bridge_commands": ["ping"],
+      "requires_explicit_user_intent": false,
+      "recommended_use": "First reachability check for the Python MCP server and Unreal bridge."
+    },
+    "get_editor_status": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read editor identity, project path, map, PIE, and slow-task state before any deeper action."
+    },
+    "get_editor_readiness": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "uses_bridge_commands": ["get_editor_status"],
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Preflight readiness gate before automation or compatibility checks."
+    },
+    "diagnose_editor_automation_readiness": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "uses_bridge_commands": ["ping", "get_editor_status", "get_output_log"],
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Compact diagnostic when readiness is blocked or before running automation."
+    },
+    "get_observability_recent_events": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read in-process observability history without contacting Unreal."
+    },
+    "summarize_observability_state": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Summarize the latest actionable observability state for handoff or triage."
+    },
+    "get_output_log": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read a bounded Unreal output-log tail with optional filters."
+    },
+    "get_level_snapshot": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read a bounded actor and component snapshot from the currently loaded level."
+    },
+    "asset_search": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Search Asset Registry metadata without loading or mutating assets."
+    },
+    "asset_dependencies": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read hard and soft dependency metadata for one asset package."
+    },
+    "asset_referencers": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read hard and soft referencer metadata for one asset package."
+    },
+    "blueprint_query": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Inspect Blueprint identity, status, variables, and components without mutating it."
+    },
+    "list_automation_tests": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "List automation tests by optional dot-path prefix."
+    },
+    "run_automation_test": {
+      "category": "automation",
+      "safety": "automation_execution",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Run one exact Unreal automation test only after readiness is proven."
+    },
+    "run_profile_automation_tests": {
+      "category": "automation",
+      "safety": "automation_execution",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "uses_bridge_commands": ["list_automation_tests", "run_automation_test", "get_output_log"],
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Run a bounded project profile automation batch with compact evidence."
+    },
+    "run_project_compatibility_gates": {
+      "category": "automation",
+      "safety": "automation_execution",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "uses_bridge_commands": ["get_editor_status", "get_level_snapshot", "asset_search", "blueprint_query", "list_automation_tests", "run_automation_test"],
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Run profile-declared compatibility sentinels against the live editor."
+    },
+    "get_project_context": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read the active project profile and profile source."
+    },
+    "get_failstate_context": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Compatibility alias for get_project_context; keep new agents on the neutral tool name."
+    },
+    "get_actors_in_level": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Legacy actor listing; prefer get_level_snapshot for bounded evidence."
+    },
+    "find_actors_by_name": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Find actors by name pattern in the current level."
+    },
+    "get_actor_properties": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read one actor's properties; prefer bounded snapshot first for discovery."
+    },
+    "spawn_actor": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Spawn a basic actor in the loaded editor world; use only for explicit level-edit tasks."
+    },
+    "delete_actor": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Delete a named actor from the loaded editor world after snapshot confirmation."
+    },
+    "set_actor_transform": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Move, rotate, or scale a named actor after confirming the target map and actor."
+    },
+    "set_actor_property": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set a property on a named actor after confirming the actor and property contract."
+    },
+    "spawn_blueprint_actor": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Spawn a Blueprint actor into the level; verify the asset path and map first."
+    },
+    "create_blueprint": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Create a Blueprint asset only in explicit asset-authoring workflows."
+    },
+    "add_component_to_blueprint": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Mutate a Blueprint asset by adding a component; compile and query afterward."
+    },
+    "set_static_mesh_properties": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set StaticMeshComponent mesh properties on a Blueprint asset."
+    },
+    "set_component_property": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set a component property on a Blueprint asset after proving the component exists."
+    },
+    "set_physics_properties": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set physics properties on a Blueprint component."
+    },
+    "compile_blueprint": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Compile a Blueprint after intentional Blueprint asset edits."
+    },
+    "set_blueprint_property": {
+      "category": "blueprint_asset_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set a Blueprint class default property after confirming the property name and value."
+    },
+    "add_blueprint_event_node": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add an event node to a Blueprint graph in explicit graph-authoring workflows."
+    },
+    "add_blueprint_input_action_node": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add an input action node to a Blueprint graph after input mapping is confirmed."
+    },
+    "add_blueprint_function_node": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add a function-call node to a Blueprint graph."
+    },
+    "connect_blueprint_nodes": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Connect Blueprint graph nodes only after the exact node IDs are known."
+    },
+    "add_blueprint_variable": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add a Blueprint variable in an explicit graph or asset-authoring workflow."
+    },
+    "add_blueprint_get_self_component_reference": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add a component reference node to a Blueprint graph."
+    },
+    "add_blueprint_self_reference": {
+      "category": "blueprint_graph_mutation",
+      "safety": "blueprint_graph_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add a self-reference node to a Blueprint graph."
+    },
+    "find_blueprint_nodes": {
+      "category": "blueprint_graph_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read Blueprint graph node IDs before making graph edits."
+    },
+    "create_input_mapping": {
+      "category": "project_config_mutation",
+      "safety": "project_config_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Mutate project input configuration only when input setup is the explicit task."
+    },
+    "create_umg_widget_blueprint": {
+      "category": "umg_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Create a UMG Widget Blueprint asset in explicit UI-authoring workflows."
+    },
+    "add_text_block_to_widget": {
+      "category": "umg_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Mutate a Widget Blueprint by adding a text block."
+    },
+    "add_button_to_widget": {
+      "category": "umg_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Mutate a Widget Blueprint by adding a button."
+    },
+    "bind_widget_event": {
+      "category": "umg_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Bind a Widget Blueprint event in explicit UI-authoring workflows."
+    },
+    "add_widget_to_viewport": {
+      "category": "viewport_or_file_output",
+      "safety": "viewport_or_file_output",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Add a widget instance to the game viewport for explicit UI preview tasks."
+    },
+    "set_text_block_binding": {
+      "category": "umg_mutation",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Set a text binding on a Widget Blueprint after confirming the target widget."
+    },
+    "ping": {
+      "category": "observability",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Unreal bridge command used internally by uemcp_ping."
+    },
+    "create_actor": {
+      "category": "level_mutation",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Legacy bridge alias for spawning an actor; use the registered spawn_actor MCP tool instead."
+    },
+    "focus_viewport": {
+      "category": "viewport_or_file_output",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Bridge-only viewport camera command; not currently exposed as an MCP tool."
+    },
+    "take_screenshot": {
+      "category": "viewport_or_file_output",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Bridge-only screenshot command that writes a PNG file; not currently exposed as an MCP tool."
+    },
+    "set_pawn_properties": {
+      "category": "blueprint_asset_mutation",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Bridge-only legacy Blueprint property helper; prefer explicit registered property tools."
+    },
+    "add_blueprint_get_component_node": {
+      "category": "blueprint_graph_mutation",
+      "safety": "bridge_only",
+      "exposure": "bridge_only",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Bridge-only legacy component-node command; prefer registered graph tools."
+    }
+  }
+}

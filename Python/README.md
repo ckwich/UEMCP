@@ -54,6 +54,7 @@ You should make sure you have installed dependencies and/or are running in the `
 uv lock --check
 uv run --extra dev pytest -q
 uv run python -m uemcp_neutrality
+uv run python -m uemcp_tool_surface
 uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
 ```
 
@@ -81,3 +82,5 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
 ## Development
 
 Add Python MCP tools under `tools/`, keep read-only observability separate from mutating editor commands, and add pytest coverage before implementation.
+
+When adding, renaming, or exposing tools, update `../Scripts/UEMCPToolSurface.Audit.json` and run `uv run python -m uemcp_tool_surface`. That gate proves every Python MCP tool and Unreal bridge command has an explicit safety classification before the repo is shared or loaded into a broker such as Toolbox.

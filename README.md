@@ -53,6 +53,12 @@ All these capabilities are accessible through natural language commands via AI a
 - Loads and registers tool modules from the `tools` directory
 - Uses the FastMCP library to implement the Model Context Protocol
 
+### Tool Surface Safety
+- Read-only observability is the preferred default for investigation.
+- Automation and mutation tools require explicit user intent and a verified editor state.
+- The tracked audit manifest `Scripts/UEMCPToolSurface.Audit.json` classifies every Python MCP tool and Unreal bridge command.
+- Run `uv --directory Python run python -m uemcp_tool_surface` after changing tool exposure.
+
 ## 📂 Directory Structure
 
 - **MCPGameProject/** - Example Unreal project

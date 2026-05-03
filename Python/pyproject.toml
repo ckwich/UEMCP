@@ -23,7 +23,7 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["unreal_mcp_server", "uemcp_observability", "uemcp_neutrality"]
+py-modules = ["unreal_mcp_server", "uemcp_observability", "uemcp_neutrality", "uemcp_tool_surface"]
 packages = ["tools", "profiles"]
 
 [tool.setuptools.package-data]
