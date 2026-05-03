@@ -229,6 +229,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("asset_search") ||
                      CommandType == TEXT("asset_dependencies") ||
                      CommandType == TEXT("asset_referencers") ||
+                     CommandType == TEXT("blueprint_query") ||
                      CommandType == TEXT("list_automation_tests") ||
                      CommandType == TEXT("run_automation_test") ||
                      CommandType == TEXT("get_actors_in_level") ||

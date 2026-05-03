@@ -222,6 +222,41 @@ build_asset_referencers(
 )
 ```
 
+## blueprint_query
+
+Loads one Blueprint through Unreal's asset system and reports stored Blueprint metadata without compiling, saving, or mutating the asset. Use this after `asset_search` and relationship checks when an agent needs class identity, generated-class status, exposed variables, or simple component template evidence.
+
+Parameters:
+
+- `asset_path`: required Blueprint object path, package path, repo-style `Content/...` path, or absolute content path. Object paths such as `/Game/Foo/Bar.Bar` normalize to package name `/Game/Foo/Bar`.
+- `include_variables`: include `NewVariables` metadata. Defaults to true.
+- `include_components`: include Simple Construction Script component node metadata. Defaults to true.
+- `variable_limit`: maximum variables returned, clamped from 1 to 1000.
+- `component_limit`: maximum component nodes returned, clamped from 1 to 1000.
+
+The response includes:
+
+- `asset_path`, `package_name`, `object_path`, `asset_found`, `source_asset_count`, and `source_asset`.
+- `blueprint_name`, `blueprint_type`, `status`, `is_up_to_date`, `blueprint_category`, and `blueprint_description`.
+- `parent_class`, `generated_class`, and `skeleton_class`, each with existence, name, path, class path, native flag, and super-class metadata where available.
+- `variables`, `variable_count`, `returned_variable_count`, and `variables_truncated`.
+- `components`, `component_count`, `returned_component_count`, and `components_truncated`.
+- `asset_registry_loading`, `filters`, and `warnings`.
+
+Variable entries include name, guid, pin type, friendly name, category, property flags, replication metadata, default value, common boolean flag projections, and metadata key/value pairs. Component entries include SCS variable name, attach/parent metadata, child count, component class, and component template identity when Unreal reports one.
+
+For Failstate Blockout validation:
+
+```python
+build_blueprint_query(
+    asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+    include_variables=True,
+    include_components=True,
+    variable_limit=50,
+    component_limit=50,
+)
+```
+
 ## list_automation_tests
 
 Lists Unreal automation tests currently visible to the editor automation framework. The bridge calls `FAutomationTestFramework::LoadTestModules()` and `GetValidTestNames()` on the game thread, then returns a bounded, prefix-filtered result.
@@ -337,6 +372,6 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 
   -CloseLaunchedEditor
 ```
 
-When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It then requires `asset_dependencies` and `asset_referencers` for `/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover` to normalize the package, find source asset metadata, preserve the hard/soft filters, stay within the requested limit, and return well-formed relationship entries when Unreal reports any. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
+When the target project path contains Failstate, the script additionally requires `asset_search(root="Content/Failstate/Blueprints/Blockout", name_contains="BP_FSBlockout", limit=50)` to normalize to `/Game/Failstate/Blueprints/Blockout` and return the expected Blockout Blueprints: `BP_FSBlockoutCover`, `BP_FSBlockoutFloor`, and `BP_FSBlockoutVisualOnly`. It then requires `asset_dependencies` and `asset_referencers` for `/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover` to normalize the package, find source asset metadata, preserve the hard/soft filters, stay within the requested limit, and return well-formed relationship entries when Unreal reports any. It also requires `blueprint_query` for that Blockout cover Blueprint to report Blueprint source metadata, status, parent class, generated class, skeleton class, bounded variable counts, and bounded SCS component metadata. It also requires `list_automation_tests(prefix="Failstate.Phase1")` to return at least one Failstate automation test and to keep every returned test inside that prefix. It then runs `run_profile_automation_tests(profile_name="failstate", prefix="Failstate.Phase1", limit=10, require_ready=true, readiness_timeout_seconds=60, readiness_stable_samples=2)` and fails if the profile readiness gate is missing, unexpected observability events are present, or the prefix-batch summary is not successful.
 
 If an external project has no `Plugins\UnrealMCP\UnrealMCP.uplugin` and no `-PluginPath`, the script fails before launching the editor instead of waiting for a bridge that cannot start.

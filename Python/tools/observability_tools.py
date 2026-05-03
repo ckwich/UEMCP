@@ -810,6 +810,31 @@ def build_asset_referencers(
     )
 
 
+def build_blueprint_query(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    asset_path: str,
+    include_variables: bool = True,
+    include_components: bool = True,
+    variable_limit: int = 100,
+    component_limit: int = 100,
+) -> Dict[str, Any]:
+    bounded_variable_limit = max(1, min(int(variable_limit), 1000))
+    bounded_component_limit = max(1, min(int(component_limit), 1000))
+    return execute_bridge_command(
+        tool="blueprint_query",
+        command="blueprint_query",
+        connection_factory=connection_factory,
+        params={
+            "asset_path": asset_path,
+            "include_variables": bool(include_variables),
+            "include_components": bool(include_components),
+            "variable_limit": bounded_variable_limit,
+            "component_limit": bounded_component_limit,
+        },
+    )
+
+
 def build_automation_test_run(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -1408,6 +1433,24 @@ def register_observability_tools(mcp: FastMCP):
             include_hard=include_hard,
             include_soft=include_soft,
             limit=limit,
+        )
+
+    @mcp.tool()
+    def blueprint_query(
+        ctx: Context,
+        asset_path: str,
+        include_variables: bool = True,
+        include_components: bool = True,
+        variable_limit: int = 100,
+        component_limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Inspect Blueprint identity, class status, variables, and components read-only."""
+        return build_blueprint_query(
+            asset_path=asset_path,
+            include_variables=include_variables,
+            include_components=include_components,
+            variable_limit=variable_limit,
+            component_limit=component_limit,
         )
 
     @mcp.tool()

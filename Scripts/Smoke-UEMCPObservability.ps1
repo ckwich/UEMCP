@@ -141,6 +141,7 @@ from tools.observability_tools import (
     build_asset_search,
     build_automation_test_run,
     build_automation_tests,
+    build_blueprint_query,
     build_editor_automation_readiness_diagnostic,
     build_editor_readiness,
     build_editor_status,
@@ -251,6 +252,18 @@ if is_failstate_project:
                 include_hard=True,
                 include_soft=True,
                 limit=50,
+            ),
+        )
+    )
+    checks.append(
+        (
+            "blueprint_query_failstate_blockout_cover",
+            build_blueprint_query(
+                asset_path=failstate_blockout_cover_package,
+                include_variables=True,
+                include_components=True,
+                variable_limit=50,
+                component_limit=50,
             ),
         )
     )
@@ -554,6 +567,57 @@ if is_failstate_project:
             package_name = str(relationship.get("package_name") or "")
             if package_name and not package_name.startswith("/"):
                 failures.append(f"{check_name} relationship package is not a long package name: {relationship}")
+
+    blueprint_data = dict(check_results["blueprint_query_failstate_blockout_cover"].get("data") or {})
+    blueprint_filters = dict(blueprint_data.get("filters") or {})
+    blueprint_source_asset = dict(blueprint_data.get("source_asset") or {})
+    blueprint_parent_class = dict(blueprint_data.get("parent_class") or {})
+    blueprint_generated_class = dict(blueprint_data.get("generated_class") or {})
+    blueprint_skeleton_class = dict(blueprint_data.get("skeleton_class") or {})
+    if blueprint_data.get("package_name") != failstate_blockout_cover_package:
+        failures.append(
+            "blueprint_query did not normalize the Blockout cover package: "
+            f"{blueprint_data}"
+        )
+    if blueprint_data.get("asset_found") is not True:
+        failures.append(f"blueprint_query did not find source asset data: {blueprint_data}")
+    if blueprint_source_asset.get("asset_class") != "Blueprint":
+        failures.append(f"blueprint_query source asset was not a Blueprint: {blueprint_data}")
+    if blueprint_data.get("blueprint_name") != "BP_FSBlockoutCover":
+        failures.append(f"blueprint_query returned unexpected Blueprint name: {blueprint_data}")
+    if not blueprint_data.get("status"):
+        failures.append(f"blueprint_query did not report Blueprint status: {blueprint_data}")
+    if blueprint_parent_class.get("exists") is not True or not blueprint_parent_class.get("class_name"):
+        failures.append(f"blueprint_query did not report a parent class: {blueprint_data}")
+    if blueprint_generated_class.get("exists") is not True or not blueprint_generated_class.get("class_name"):
+        failures.append(f"blueprint_query did not report a generated class: {blueprint_data}")
+    if blueprint_skeleton_class.get("exists") is not True or not blueprint_skeleton_class.get("class_name"):
+        failures.append(f"blueprint_query did not report a skeleton class: {blueprint_data}")
+    if blueprint_filters.get("include_variables") is not True:
+        failures.append(f"blueprint_query did not preserve include_variables: {blueprint_data}")
+    if blueprint_filters.get("include_components") is not True:
+        failures.append(f"blueprint_query did not preserve include_components: {blueprint_data}")
+    if blueprint_data.get("returned_variable_count", 0) > 50:
+        failures.append(f"blueprint_query returned more variables than its limit: {blueprint_data}")
+    if blueprint_data.get("returned_component_count", 0) > 50:
+        failures.append(f"blueprint_query returned more components than its limit: {blueprint_data}")
+    if blueprint_data.get("variable_count", 0) < blueprint_data.get("returned_variable_count", 0):
+        failures.append(f"blueprint_query variable counts are inconsistent: {blueprint_data}")
+    if blueprint_data.get("component_count", 0) < blueprint_data.get("returned_component_count", 0):
+        failures.append(f"blueprint_query component counts are inconsistent: {blueprint_data}")
+    for variable in blueprint_data.get("variables") or []:
+        if not variable.get("name"):
+            failures.append(f"blueprint_query variable missing name: {variable}")
+        if not isinstance(variable.get("type"), dict):
+            failures.append(f"blueprint_query variable missing type: {variable}")
+    for component in blueprint_data.get("components") or []:
+        if not component.get("variable_name"):
+            failures.append(f"blueprint_query component missing variable_name: {component}")
+        component_class = dict(component.get("component_class") or {})
+        if component_class.get("exists") is not True or not component_class.get("class_name"):
+            failures.append(f"blueprint_query component missing class metadata: {component}")
+        if component.get("template_exists") is True and not component.get("component_template_name"):
+            failures.append(f"blueprint_query component template missing name: {component}")
 
     failstate_tests = dict(check_results["list_failstate_automation_tests"].get("data") or {})
     returned_failstate_tests = failstate_tests.get("tests") or []

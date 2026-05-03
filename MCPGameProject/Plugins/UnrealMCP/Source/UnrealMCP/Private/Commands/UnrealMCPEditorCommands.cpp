@@ -34,8 +34,12 @@
 #include "Components/StaticMeshComponent.h"
 #include "EditorSubsystem.h"
 #include "Subsystems/EditorActorSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "EdGraph/EdGraphPin.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -386,6 +390,250 @@ namespace
         return true;
     }
 
+    bool IsBlueprintAssetData(const FAssetData& AssetData)
+    {
+        const FString AssetClassPath = AssetData.AssetClassPath.ToString();
+        const FString AssetClass = AssetClassShortName(AssetClassPath);
+        return AssetClass.Equals(TEXT("Blueprint"), ESearchCase::IgnoreCase) ||
+            AssetClassPath.Contains(TEXT("/Blueprint"), ESearchCase::IgnoreCase) ||
+            AssetClassPath.EndsWith(TEXT(".Blueprint"), ESearchCase::IgnoreCase);
+    }
+
+    bool TryGetBlueprintAssetDataForPackage(
+        IAssetRegistry& AssetRegistry,
+        FName PackageName,
+        FAssetData& OutAssetData,
+        int32& OutAssetCount
+    )
+    {
+        TArray<FAssetData> AssetDataList;
+        AssetRegistry.GetAssetsByPackageName(PackageName, AssetDataList, false, false);
+        AssetDataList.Sort([](const FAssetData& Left, const FAssetData& Right)
+        {
+            const bool bLeftBlueprint = IsBlueprintAssetData(Left);
+            const bool bRightBlueprint = IsBlueprintAssetData(Right);
+            if (bLeftBlueprint != bRightBlueprint)
+            {
+                return bLeftBlueprint;
+            }
+            return Left.GetObjectPathString() < Right.GetObjectPathString();
+        });
+
+        OutAssetCount = AssetDataList.Num();
+        for (const FAssetData& AssetData : AssetDataList)
+        {
+            if (IsBlueprintAssetData(AssetData))
+            {
+                OutAssetData = AssetData;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    FString BlueprintStatusToString(EBlueprintStatus Status)
+    {
+        switch (Status)
+        {
+            case BS_Unknown:
+                return TEXT("Unknown");
+            case BS_Dirty:
+                return TEXT("Dirty");
+            case BS_Error:
+                return TEXT("Error");
+            case BS_UpToDate:
+                return TEXT("UpToDate");
+            case BS_BeingCreated:
+                return TEXT("BeingCreated");
+            case BS_UpToDateWithWarnings:
+                return TEXT("UpToDateWithWarnings");
+            default:
+                return TEXT("Unknown");
+        }
+    }
+
+    FString BlueprintTypeToString(EBlueprintType BlueprintType)
+    {
+        switch (BlueprintType)
+        {
+            case BPTYPE_Normal:
+                return TEXT("Normal");
+            case BPTYPE_Const:
+                return TEXT("Const");
+            case BPTYPE_MacroLibrary:
+                return TEXT("MacroLibrary");
+            case BPTYPE_Interface:
+                return TEXT("Interface");
+            case BPTYPE_LevelScript:
+                return TEXT("LevelScript");
+            case BPTYPE_FunctionLibrary:
+                return TEXT("FunctionLibrary");
+            default:
+                return TEXT("Unknown");
+        }
+    }
+
+    FString PinContainerTypeToString(EPinContainerType ContainerType)
+    {
+        switch (ContainerType)
+        {
+            case EPinContainerType::None:
+                return TEXT("None");
+            case EPinContainerType::Array:
+                return TEXT("Array");
+            case EPinContainerType::Set:
+                return TEXT("Set");
+            case EPinContainerType::Map:
+                return TEXT("Map");
+            default:
+                return TEXT("Unknown");
+        }
+    }
+
+    TSharedPtr<FJsonObject> ClassToJson(const UClass* Class)
+    {
+        TSharedPtr<FJsonObject> ClassObj = MakeShared<FJsonObject>();
+        ClassObj->SetBoolField(TEXT("exists"), Class != nullptr);
+        if (!Class)
+        {
+            return ClassObj;
+        }
+
+        ClassObj->SetStringField(TEXT("class_name"), Class->GetName());
+        ClassObj->SetStringField(TEXT("path_name"), Class->GetPathName());
+        ClassObj->SetStringField(TEXT("class_path"), Class->GetClassPathName().ToString());
+        ClassObj->SetBoolField(TEXT("native"), Class->HasAnyClassFlags(CLASS_Native));
+
+        const UClass* SuperClass = Class->GetSuperClass();
+        if (SuperClass)
+        {
+            ClassObj->SetStringField(TEXT("super_class"), SuperClass->GetName());
+            ClassObj->SetStringField(TEXT("super_class_path"), SuperClass->GetPathName());
+        }
+
+        if (Class->ClassGeneratedBy)
+        {
+            ClassObj->SetStringField(TEXT("generated_by"), Class->ClassGeneratedBy->GetPathName());
+        }
+
+        return ClassObj;
+    }
+
+    TSharedPtr<FJsonObject> PinTypeToJson(const FEdGraphPinType& PinType)
+    {
+        TSharedPtr<FJsonObject> PinTypeObj = MakeShared<FJsonObject>();
+        PinTypeObj->SetStringField(TEXT("category"), PinType.PinCategory.ToString());
+        PinTypeObj->SetStringField(TEXT("sub_category"), PinType.PinSubCategory.ToString());
+        PinTypeObj->SetStringField(TEXT("container_type"), PinContainerTypeToString(PinType.ContainerType));
+        PinTypeObj->SetBoolField(TEXT("is_container"), PinType.IsContainer());
+        PinTypeObj->SetBoolField(TEXT("is_reference"), PinType.bIsReference);
+        PinTypeObj->SetBoolField(TEXT("is_const"), PinType.bIsConst);
+        PinTypeObj->SetBoolField(TEXT("is_weak_pointer"), PinType.bIsWeakPointer);
+        PinTypeObj->SetBoolField(TEXT("is_uobject_wrapper"), PinType.bIsUObjectWrapper);
+
+        UObject* SubCategoryObject = PinType.PinSubCategoryObject.Get();
+        if (SubCategoryObject)
+        {
+            PinTypeObj->SetStringField(TEXT("sub_category_object"), SubCategoryObject->GetPathName());
+            PinTypeObj->SetStringField(
+                TEXT("sub_category_object_class"),
+                SubCategoryObject->GetClass() ? SubCategoryObject->GetClass()->GetName() : FString()
+            );
+        }
+
+        return PinTypeObj;
+    }
+
+    TSharedPtr<FJsonObject> BlueprintVariableToJson(const FBPVariableDescription& Variable)
+    {
+        TSharedPtr<FJsonObject> VariableObj = MakeShared<FJsonObject>();
+        VariableObj->SetStringField(TEXT("name"), Variable.VarName.ToString());
+        VariableObj->SetStringField(TEXT("guid"), Variable.VarGuid.ToString(EGuidFormats::DigitsWithHyphens));
+        VariableObj->SetObjectField(TEXT("type"), PinTypeToJson(Variable.VarType));
+        VariableObj->SetStringField(TEXT("friendly_name"), Variable.FriendlyName);
+        VariableObj->SetStringField(TEXT("category"), Variable.Category.ToString());
+        VariableObj->SetStringField(TEXT("property_flags"), LexToString(Variable.PropertyFlags));
+        VariableObj->SetStringField(TEXT("rep_notify_func"), Variable.RepNotifyFunc.ToString());
+        VariableObj->SetNumberField(
+            TEXT("replication_condition"),
+            static_cast<int32>(Variable.ReplicationCondition.GetValue())
+        );
+        VariableObj->SetStringField(TEXT("default_value"), Variable.DefaultValue);
+        VariableObj->SetBoolField(TEXT("editable"), (Variable.PropertyFlags & CPF_Edit) != 0);
+        VariableObj->SetBoolField(TEXT("blueprint_visible"), (Variable.PropertyFlags & CPF_BlueprintVisible) != 0);
+        VariableObj->SetBoolField(TEXT("blueprint_read_only"), (Variable.PropertyFlags & CPF_BlueprintReadOnly) != 0);
+        VariableObj->SetBoolField(TEXT("replicated"), (Variable.PropertyFlags & CPF_Net) != 0);
+        VariableObj->SetBoolField(TEXT("save_game"), (Variable.PropertyFlags & CPF_SaveGame) != 0);
+
+        TSharedPtr<FJsonObject> MetadataObj = MakeShared<FJsonObject>();
+        for (const FBPVariableMetaDataEntry& Entry : Variable.MetaDataArray)
+        {
+            if (Entry.DataKey != NAME_None)
+            {
+                MetadataObj->SetStringField(Entry.DataKey.ToString(), Entry.DataValue);
+            }
+        }
+        VariableObj->SetObjectField(TEXT("metadata"), MetadataObj);
+        return VariableObj;
+    }
+
+    TSharedPtr<FJsonObject> ComponentNodeToJson(
+        const USCS_Node* Node,
+        UBlueprintGeneratedClass* GeneratedClass
+    )
+    {
+        TSharedPtr<FJsonObject> ComponentObj = MakeShared<FJsonObject>();
+        if (!Node)
+        {
+            return ComponentObj;
+        }
+
+        UActorComponent* ComponentTemplate = nullptr;
+        if (GeneratedClass)
+        {
+            ComponentTemplate = Node->GetActualComponentTemplate(GeneratedClass);
+        }
+        if (!ComponentTemplate)
+        {
+            ComponentTemplate = Node->ComponentTemplate;
+        }
+
+        ComponentObj->SetStringField(TEXT("variable_name"), Node->GetVariableName().ToString());
+        ComponentObj->SetStringField(TEXT("attach_to_name"), Node->AttachToName.ToString());
+        ComponentObj->SetStringField(
+            TEXT("parent_component_or_variable_name"),
+            Node->ParentComponentOrVariableName.ToString()
+        );
+        ComponentObj->SetStringField(
+            TEXT("parent_component_owner_class_name"),
+            Node->ParentComponentOwnerClassName.ToString()
+        );
+        ComponentObj->SetNumberField(TEXT("child_count"), Node->GetChildNodes().Num());
+
+        if (Node->ComponentClass)
+        {
+            ComponentObj->SetObjectField(TEXT("component_class"), ClassToJson(Node->ComponentClass));
+        }
+
+        ComponentObj->SetBoolField(TEXT("template_exists"), ComponentTemplate != nullptr);
+        if (ComponentTemplate)
+        {
+            ComponentObj->SetStringField(TEXT("component_template_name"), ComponentTemplate->GetName());
+            ComponentObj->SetStringField(TEXT("component_template_path"), ComponentTemplate->GetPathName());
+            ComponentObj->SetStringField(
+                TEXT("component_template_class"),
+                ComponentTemplate->GetClass() ? ComponentTemplate->GetClass()->GetName() : FString()
+            );
+            ComponentObj->SetBoolField(
+                TEXT("component_template_editor_only"),
+                ComponentTemplate->IsEditorOnly()
+            );
+        }
+
+        return ComponentObj;
+    }
+
     TSharedPtr<FJsonObject> AssetDependencyToJson(
         const FAssetDependency& Dependency,
         IAssetRegistry& AssetRegistry
@@ -633,6 +881,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("asset_referencers"))
     {
         return HandleAssetReferencers(Params);
+    }
+    else if (CommandType == TEXT("blueprint_query"))
+    {
+        return HandleBlueprintQuery(Params);
     }
     else if (CommandType == TEXT("list_automation_tests"))
     {
@@ -922,6 +1174,179 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetDependencies(const 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetReferencers(const TSharedPtr<FJsonObject>& Params)
 {
     return HandleAssetRelationshipQuery(Params, true);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleBlueprintQuery(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+    const FString PackageNameString = NormalizeAssetPackageName(AssetPath);
+    if (PackageNameString.IsEmpty())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            TEXT("Missing required asset_path for Blueprint query")
+        );
+    }
+
+    bool bIncludeVariables = true;
+    if (Params->HasField(TEXT("include_variables")))
+    {
+        Params->TryGetBoolField(TEXT("include_variables"), bIncludeVariables);
+    }
+
+    bool bIncludeComponents = true;
+    if (Params->HasField(TEXT("include_components")))
+    {
+        Params->TryGetBoolField(TEXT("include_components"), bIncludeComponents);
+    }
+
+    double RequestedVariableLimit = 100.0;
+    if (Params->HasField(TEXT("variable_limit")))
+    {
+        Params->TryGetNumberField(TEXT("variable_limit"), RequestedVariableLimit);
+    }
+    const int32 VariableLimit = FMath::Clamp(static_cast<int32>(RequestedVariableLimit), 1, 1000);
+
+    double RequestedComponentLimit = 100.0;
+    if (Params->HasField(TEXT("component_limit")))
+    {
+        Params->TryGetNumberField(TEXT("component_limit"), RequestedComponentLimit);
+    }
+    const int32 ComponentLimit = FMath::Clamp(static_cast<int32>(RequestedComponentLimit), 1, 1000);
+
+    IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+        TEXT("AssetRegistry")
+    ).Get();
+
+    FAssetData BlueprintAssetData;
+    int32 SourceAssetCount = 0;
+    const FName PackageName(*PackageNameString);
+    const bool bFoundBlueprintAsset = TryGetBlueprintAssetDataForPackage(
+        AssetRegistry,
+        PackageName,
+        BlueprintAssetData,
+        SourceAssetCount
+    );
+    if (!bFoundBlueprintAsset)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Blueprint asset not found for package: %s"),
+            *PackageNameString
+        ));
+    }
+
+    const FString ObjectPath = BlueprintAssetData.GetObjectPathString();
+    UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Blueprint asset could not be loaded: %s"),
+            *ObjectPath
+        ));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> VariableValues;
+    const int32 VariableCount = Blueprint->NewVariables.Num();
+    if (bIncludeVariables)
+    {
+        VariableValues.Reserve(FMath::Min(VariableLimit, VariableCount));
+        for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+        {
+            if (VariableValues.Num() >= VariableLimit)
+            {
+                break;
+            }
+            VariableValues.Add(MakeShared<FJsonValueObject>(BlueprintVariableToJson(Variable)));
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ComponentValues;
+    int32 ComponentCount = 0;
+    USimpleConstructionScript* SimpleConstructionScript = Blueprint->SimpleConstructionScript;
+    if (SimpleConstructionScript)
+    {
+        const TArray<USCS_Node*>& Nodes = SimpleConstructionScript->GetAllNodes();
+        ComponentCount = Nodes.Num();
+        if (bIncludeComponents)
+        {
+            ComponentValues.Reserve(FMath::Min(ComponentLimit, ComponentCount));
+            UBlueprintGeneratedClass* GeneratedClass = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+            for (const USCS_Node* Node : Nodes)
+            {
+                if (ComponentValues.Num() >= ComponentLimit)
+                {
+                    break;
+                }
+                ComponentValues.Add(MakeShared<FJsonValueObject>(
+                    ComponentNodeToJson(Node, GeneratedClass)
+                ));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+    FiltersObj->SetStringField(TEXT("asset_path"), AssetPath);
+    FiltersObj->SetStringField(TEXT("package_name"), PackageNameString);
+    FiltersObj->SetBoolField(TEXT("include_variables"), bIncludeVariables);
+    FiltersObj->SetBoolField(TEXT("include_components"), bIncludeComponents);
+    FiltersObj->SetNumberField(TEXT("variable_limit"), VariableLimit);
+    FiltersObj->SetNumberField(TEXT("component_limit"), ComponentLimit);
+
+    TArray<TSharedPtr<FJsonValue>> Warnings;
+    if (AssetRegistry.IsLoadingAssets())
+    {
+        Warnings.Add(MakeShared<FJsonValueString>(
+            TEXT("Asset Registry is still loading assets; Blueprint metadata may be incomplete")
+        ));
+    }
+    if (!Blueprint->GeneratedClass)
+    {
+        Warnings.Add(MakeShared<FJsonValueString>(
+            TEXT("Blueprint has no generated class loaded")
+        ));
+    }
+    if (!Blueprint->SkeletonGeneratedClass)
+    {
+        Warnings.Add(MakeShared<FJsonValueString>(
+            TEXT("Blueprint has no skeleton generated class loaded")
+        ));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetStringField(TEXT("package_name"), PackageNameString);
+    ResultObj->SetStringField(TEXT("object_path"), ObjectPath);
+    ResultObj->SetBoolField(TEXT("asset_found"), true);
+    ResultObj->SetNumberField(TEXT("source_asset_count"), SourceAssetCount);
+    ResultObj->SetObjectField(TEXT("source_asset"), AssetDataToJson(BlueprintAssetData));
+    ResultObj->SetStringField(TEXT("blueprint_name"), Blueprint->GetName());
+    ResultObj->SetStringField(TEXT("blueprint_type"), BlueprintTypeToString(Blueprint->BlueprintType));
+    ResultObj->SetStringField(TEXT("status"), BlueprintStatusToString(Blueprint->Status));
+    ResultObj->SetBoolField(TEXT("is_up_to_date"), Blueprint->IsUpToDate());
+    ResultObj->SetStringField(TEXT("blueprint_category"), Blueprint->BlueprintCategory);
+    ResultObj->SetStringField(TEXT("blueprint_description"), Blueprint->BlueprintDescription);
+    ResultObj->SetObjectField(TEXT("parent_class"), ClassToJson(Blueprint->ParentClass));
+    ResultObj->SetObjectField(TEXT("generated_class"), ClassToJson(Blueprint->GeneratedClass));
+    ResultObj->SetObjectField(TEXT("skeleton_class"), ClassToJson(Blueprint->SkeletonGeneratedClass));
+    ResultObj->SetArrayField(TEXT("variables"), VariableValues);
+    ResultObj->SetNumberField(TEXT("variable_count"), VariableCount);
+    ResultObj->SetNumberField(TEXT("returned_variable_count"), VariableValues.Num());
+    ResultObj->SetBoolField(
+        TEXT("variables_truncated"),
+        bIncludeVariables && VariableCount > VariableValues.Num()
+    );
+    ResultObj->SetArrayField(TEXT("components"), ComponentValues);
+    ResultObj->SetNumberField(TEXT("component_count"), ComponentCount);
+    ResultObj->SetNumberField(TEXT("returned_component_count"), ComponentValues.Num());
+    ResultObj->SetBoolField(
+        TEXT("components_truncated"),
+        bIncludeComponents && ComponentCount > ComponentValues.Num()
+    );
+    ResultObj->SetBoolField(TEXT("asset_registry_loading"), AssetRegistry.IsLoadingAssets());
+    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+    ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAutomationTests(const TSharedPtr<FJsonObject>& Params)

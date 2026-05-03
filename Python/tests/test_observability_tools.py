@@ -4,6 +4,7 @@ from tools.observability_tools import (
     build_asset_search,
     build_automation_test_run,
     build_automation_tests,
+    build_blueprint_query,
     build_editor_automation_readiness_diagnostic,
     build_editor_status,
     build_editor_readiness,
@@ -538,6 +539,104 @@ def test_build_asset_referencers_passes_bounded_query_to_bridge():
     ]
 
 
+def test_build_blueprint_query_passes_bounded_query_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "package_name": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "object_path": (
+                    "/Game/Failstate/Blueprints/Blockout/"
+                    "BP_FSBlockoutCover.BP_FSBlockoutCover"
+                ),
+                "blueprint_name": "BP_FSBlockoutCover",
+                "status": "UpToDate",
+                "is_up_to_date": True,
+                "parent_class": {"class_name": "Actor"},
+                "generated_class": {"class_name": "BP_FSBlockoutCover_C"},
+                "skeleton_class": {"class_name": "SKEL_BP_FSBlockoutCover_C"},
+                "variables": [
+                    {
+                        "name": "CoverHeight",
+                        "type": {"category": "float", "container_type": "None"},
+                    }
+                ],
+                "variable_count": 1,
+                "returned_variable_count": 1,
+                "variables_truncated": False,
+                "components": [],
+                "component_count": 0,
+                "returned_component_count": 0,
+                "components_truncated": False,
+            },
+        }
+    )
+
+    envelope = build_blueprint_query(
+        lambda: connection,
+        asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+        include_variables=True,
+        include_components=False,
+        variable_limit=50,
+        component_limit=25,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "blueprint_query"
+    assert envelope["data"]["blueprint_name"] == "BP_FSBlockoutCover"
+    assert envelope["data"]["parent_class"]["class_name"] == "Actor"
+    assert envelope["data"]["generated_class"]["class_name"] == "BP_FSBlockoutCover_C"
+    assert connection.calls == [
+        (
+            "blueprint_query",
+            {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "include_variables": True,
+                "include_components": False,
+                "variable_limit": 50,
+                "component_limit": 25,
+            },
+        )
+    ]
+
+
+def test_build_blueprint_query_clamps_limits():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "package_name": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "blueprint_name": "BP_FSBlockoutCover",
+                "variables": [],
+                "components": [],
+            },
+        }
+    )
+
+    envelope = build_blueprint_query(
+        lambda: connection,
+        asset_path="/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+        variable_limit=5000,
+        component_limit=0,
+    )
+
+    assert envelope["ok"] is True
+    assert connection.calls == [
+        (
+            "blueprint_query",
+            {
+                "asset_path": "/Game/Failstate/Blueprints/Blockout/BP_FSBlockoutCover",
+                "include_variables": True,
+                "include_components": True,
+                "variable_limit": 1000,
+                "component_limit": 1,
+            },
+        )
+    ]
+
+
 def test_register_observability_tools_exposes_asset_registry_relationship_tools():
     recorder = ToolRecorder()
 
@@ -546,6 +645,7 @@ def test_register_observability_tools_exposes_asset_registry_relationship_tools(
     assert "asset_search" in recorder.tools
     assert "asset_dependencies" in recorder.tools
     assert "asset_referencers" in recorder.tools
+    assert "blueprint_query" in recorder.tools
 
 
 def test_build_automation_test_run_passes_test_name_and_timeout_to_bridge():
