@@ -404,9 +404,11 @@ Supported profile schema under `compatibility_gates`:
       "class_name": "BP_LevelAnchor_C",
       "min_total_actor_count": 1,
       "min_matched_actor_count": 1,
+      "min_component_count": 1,
       "expected_actor_names": ["LevelAnchor"],
       "expected_actor_classes": ["BP_LevelAnchor_C"],
       "expected_component_names": ["SceneRoot"],
+      "expected_component_classes": ["SceneComponent"],
       "include_components": true,
       "component_limit": 20,
       "limit": 100
@@ -443,7 +445,7 @@ Supported profile schema under `compatibility_gates`:
 
 `sentinel_maps` reads `get_editor_status.current_map` and passes when the current map is one of `expected_maps`. A singular `expected_map` is also accepted. If neither field is present, the gate falls back to the profile's top-level `known_maps`.
 
-`sentinel_level_snapshots` calls `get_level_snapshot` with optional `class_name`, `name_contains`, `include_components`, and `component_limit` filters. It can assert `min_total_actor_count`, `min_matched_actor_count`, `expected_actor_names`, `expected_actor_classes`, and `expected_component_names` across the returned actors. Use component assertions with `include_components: true`.
+`sentinel_level_snapshots` calls `get_level_snapshot` with optional `class_name`, `name_contains`, `include_components`, and `component_limit` filters. It can assert `min_total_actor_count`, `min_matched_actor_count`, `min_component_count`, `expected_actor_names`, `expected_actor_classes`, `expected_component_names`, and `expected_component_classes` across the returned actors. Use component assertions with `include_components: true`.
 
 When `automation_prefixes` is omitted, the runner uses top-level `automation_test_prefixes` as compatibility gates. Empty project packs are treated as unsuccessful because they do not prove compatibility.
 

@@ -33,7 +33,7 @@ The profile names content roots, automation prefixes, log categories, known maps
 `run_project_compatibility_gates` currently supports these profile-driven gate kinds:
 
 - `sentinel_maps`: proves the live editor is currently on an expected map.
-- `sentinel_level_snapshots`: proves the current level can be observed through a bounded actor snapshot and can assert representative actor names, actor classes, component names, total actor counts, or filtered matched actor counts.
+- `sentinel_level_snapshots`: proves the current level can be observed through a bounded actor snapshot and can assert representative actor names, actor classes, component names/classes, total actor counts, filtered matched actor counts, or component counts.
 - `sentinel_asset_searches`: proves a content root resolves and named sentinel assets are discoverable.
 - `sentinel_blueprints`: proves a representative Blueprint resolves and reports expected class identity.
 - `automation_prefixes`: optionally overrides the top-level automation prefixes for compatibility validation.

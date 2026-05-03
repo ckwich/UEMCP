@@ -1887,9 +1887,11 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
                             "component_limit": 10,
                             "min_total_actor_count": 2,
                             "min_matched_actor_count": 2,
+                            "min_component_count": 2,
                             "expected_actor_names": ["MissingAnchor"],
                             "expected_actor_classes": ["BP_MissingAnchor_C"],
                             "expected_component_names": ["MissingComponent"],
+                            "expected_component_classes": ["MissingComponentClass"],
                         }
                     ]
                 },
@@ -1920,7 +1922,15 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
                         {
                             "name": "OtherActor",
                             "class": "StaticMeshActor",
-                            "components": [{"name": "OtherComponent"}],
+                            "component_count": 1,
+                            "returned_component_count": 1,
+                            "components_truncated": False,
+                            "components": [
+                                {
+                                    "name": "OtherComponent",
+                                    "class": "SceneComponent",
+                                }
+                            ],
                         }
                     ],
                     "filters": {
@@ -1953,8 +1963,10 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
     assert gate["missing_actor_names"] == ["MissingAnchor"]
     assert gate["missing_actor_classes"] == ["BP_MissingAnchor_C"]
     assert gate["missing_component_names"] == ["MissingComponent"]
+    assert gate["missing_component_classes"] == ["MissingComponentClass"]
     assert "expected at least 2" in gate["message"]
     assert "matched 1 actors, expected at least 2" in gate["message"]
+    assert "reported 1 components, expected at least 2" in gate["message"]
     assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
 
 
