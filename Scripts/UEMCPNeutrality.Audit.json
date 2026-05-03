@@ -73,6 +73,13 @@
       "reason": "The audit config must list the project-specific sentinels it guards against."
     },
     {
+      "path": "Scripts/UEMCPToolSurface.Audit.json",
+      "patterns": [
+        "failstate"
+      ],
+      "reason": "The tool-surface audit may name the retained get_failstate_context compatibility alias only."
+    },
+    {
       "path": "Python/uemcp_neutrality.py",
       "patterns": [
         "failstate"

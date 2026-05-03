@@ -9,7 +9,7 @@ from copy import deepcopy
 from threading import Lock
 from typing import Any, Callable, Deque, Dict, List, Optional
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 
 from uemcp_observability import (
     build_error_envelope,
@@ -1990,18 +1990,17 @@ def register_observability_tools(mcp: FastMCP):
     """Register read-mostly observability tools."""
 
     @mcp.tool()
-    def uemcp_ping(ctx: Context) -> Dict[str, Any]:
+    def uemcp_ping() -> Dict[str, Any]:
         """Check MCP server, bridge, and Unreal Editor reachability."""
         return build_uemcp_ping()
 
     @mcp.tool()
-    def get_editor_status(ctx: Context) -> Dict[str, Any]:
+    def get_editor_status() -> Dict[str, Any]:
         """Return read-only Unreal Editor status and project identity."""
         return build_editor_status()
 
     @mcp.tool()
     def get_editor_readiness(
-        ctx: Context,
         timeout_seconds: float = 0.0,
         stable_samples: int = 1,
         poll_interval_seconds: float = 1.0,
@@ -2017,7 +2016,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def diagnose_editor_automation_readiness(
-        ctx: Context,
         readiness_timeout_seconds: float = 0.0,
         readiness_stable_samples: int = 1,
         readiness_poll_interval_seconds: float = 1.0,
@@ -2035,7 +2033,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def get_observability_recent_events(
-        ctx: Context,
         tool: Optional[str] = None,
         limit: int = 20,
         include_success: bool = True,
@@ -2051,7 +2048,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def summarize_observability_state(
-        ctx: Context,
         tool: Optional[str] = None,
         limit: int = 20,
     ) -> Dict[str, Any]:
@@ -2063,7 +2059,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def get_output_log(
-        ctx: Context,
         limit: int = 200,
         category: Optional[str] = None,
         verbosity: Optional[str] = None,
@@ -2079,7 +2074,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def get_level_snapshot(
-        ctx: Context,
         limit: int = 100,
         class_name: Optional[str] = None,
         name_contains: Optional[str] = None,
@@ -2097,7 +2091,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def asset_search(
-        ctx: Context,
         root: Optional[str] = None,
         class_name: Optional[str] = None,
         name_contains: Optional[str] = None,
@@ -2115,7 +2108,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def asset_dependencies(
-        ctx: Context,
         asset_path: str,
         include_hard: bool = True,
         include_soft: bool = True,
@@ -2131,7 +2123,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def asset_referencers(
-        ctx: Context,
         asset_path: str,
         include_hard: bool = True,
         include_soft: bool = True,
@@ -2147,7 +2138,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def blueprint_query(
-        ctx: Context,
         asset_path: str,
         include_variables: bool = True,
         include_components: bool = True,
@@ -2165,7 +2155,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def list_automation_tests(
-        ctx: Context,
         prefix: Optional[str] = None,
         limit: int = 200,
     ) -> Dict[str, Any]:
@@ -2174,7 +2163,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def run_automation_test(
-        ctx: Context,
         test_name: str,
         timeout_seconds: float = 30.0,
     ) -> Dict[str, Any]:
@@ -2186,7 +2174,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def run_profile_automation_tests(
-        ctx: Context,
         profile_name: str = "failstate",
         test_name: Optional[str] = None,
         prefix: Optional[str] = None,
@@ -2216,7 +2203,6 @@ def register_observability_tools(mcp: FastMCP):
 
     @mcp.tool()
     def run_project_compatibility_gates(
-        ctx: Context,
         profile_name: str = "failstate",
         include_automation: bool = True,
         limit: int = 10,
@@ -2243,12 +2229,12 @@ def register_observability_tools(mcp: FastMCP):
         )
 
     @mcp.tool()
-    def get_project_context(ctx: Context, profile_name: str = "failstate") -> Dict[str, Any]:
+    def get_project_context(profile_name: str = "failstate") -> Dict[str, Any]:
         """Return the active project profile without mutating Unreal state."""
         return build_project_context(profile_name)
 
     @mcp.tool()
-    def get_failstate_context(ctx: Context, profile_name: str = "failstate") -> Dict[str, Any]:
+    def get_failstate_context(profile_name: str = "failstate") -> Dict[str, Any]:
         """Compatibility alias for get_project_context."""
         return build_failstate_context(profile_name)
 
