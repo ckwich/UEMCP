@@ -1500,8 +1500,14 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
                 "content_roots": ["Content/Example"],
                 "automation_test_prefixes": ["Example.Phase1"],
                 "log_categories": ["LogTemp"],
-                "known_maps": [],
+                "known_maps": ["/Game/Example/Maps/L_Test"],
                 "compatibility_gates": {
+                    "sentinel_maps": [
+                        {
+                            "name": "example_current_map",
+                            "expected_maps": ["/Game/Example/Maps/L_Test"],
+                        }
+                    ],
                     "sentinel_asset_searches": [
                         {
                             "name": "example_blueprints",
@@ -1533,6 +1539,14 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
     monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
     connection = SequenceUnrealConnection(
         [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Test",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
             {
                 "status": "success",
                 "result": {
@@ -1631,18 +1645,20 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
     assert envelope["tool"] == "run_project_compatibility_gates"
     assert envelope["data"]["profile_source"]["kind"] == "environment"
     assert envelope["data"]["summary"] == {
-        "total": 3,
-        "passed": 3,
+        "total": 4,
+        "passed": 4,
         "failed": 0,
         "successful": True,
     }
     assert [gate["kind"] for gate in envelope["data"]["gates"]] == [
+        "sentinel_map",
         "sentinel_asset_search",
         "sentinel_blueprint",
         "automation_prefix",
     ]
     assert envelope["data"]["observability_events"] == []
     assert connection.calls == [
+        ("get_editor_status", {}),
         ("get_editor_status", {}),
         (
             "asset_search",
@@ -1753,4 +1769,81 @@ def test_build_project_compatibility_gates_reports_missing_sentinel_asset(
     gate = envelope["data"]["gates"][0]
     assert gate["ok"] is False
     assert gate["missing_assets"] == ["BP_ExampleCore"]
+    assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
+
+
+def test_build_project_compatibility_gates_reports_unexpected_current_map(
+    monkeypatch,
+    tmp_path,
+):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "automation_test_prefixes": [],
+                "log_categories": ["LogTemp"],
+                "known_maps": ["/Game/Example/Maps/L_Expected"],
+                "compatibility_gates": {
+                    "sentinel_maps": [
+                        {
+                            "name": "example_current_map",
+                            "expected_maps": ["/Game/Example/Maps/L_Expected"],
+                        }
+                    ]
+                },
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Unexpected",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Unexpected",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 1,
+        "passed": 0,
+        "failed": 1,
+        "successful": False,
+    }
+    gate = envelope["data"]["gates"][0]
+    assert gate["kind"] == "sentinel_map"
+    assert gate["ok"] is False
+    assert gate["current_map"] == "/Game/Example/Maps/L_Unexpected"
+    assert gate["expected_maps"] == ["/Game/Example/Maps/L_Expected"]
+    assert "Unexpected current map" in gate["message"]
     assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"

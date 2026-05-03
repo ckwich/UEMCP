@@ -1394,6 +1394,65 @@ def _asset_search_gate(
     }
 
 
+def _map_gate(
+    connection_factory: Callable[[], Any],
+    gate_config: Dict[str, Any],
+    *,
+    profile: Dict[str, Any],
+    index: int,
+) -> Dict[str, Any]:
+    name = _gate_name(gate_config, f"sentinel_map_{index}")
+    envelope = build_editor_status(connection_factory)
+    data = dict(envelope.get("data") or {})
+    current_map = str(data.get("current_map") or "")
+    expected_maps = [
+        str(map_path)
+        for map_path in gate_config.get("expected_maps") or []
+        if str(map_path)
+    ]
+    expected_map = gate_config.get("expected_map")
+    if expected_map:
+        expected_maps.append(str(expected_map))
+    if not expected_maps:
+        expected_maps = [
+            str(map_path)
+            for map_path in profile.get("known_maps") or []
+            if str(map_path)
+        ]
+
+    expected_maps = sorted(set(expected_maps))
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Editor status command failed")
+    if not current_map:
+        errors.append("Editor status did not report current_map")
+    if expected_maps and current_map and current_map not in expected_maps:
+        errors.append(
+            "Unexpected current map: "
+            f"{current_map!r}, expected one of {expected_maps!r}"
+        )
+    if not expected_maps:
+        warnings.append("Map gate has no expected_maps and profile has no known_maps")
+
+    map_matches = not expected_maps or current_map in expected_maps
+    ok = bool(envelope.get("ok")) and bool(current_map) and map_matches
+    return {
+        "name": name,
+        "kind": "sentinel_map",
+        "tool": "get_editor_status",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": "Sentinel map passed" if ok else "; ".join(errors),
+        "errors": errors,
+        "warnings": warnings + list(envelope.get("warnings") or []),
+        "current_map": current_map,
+        "expected_maps": expected_maps,
+        "editor": _editor_identity(data),
+    }
+
+
 def _blueprint_gate(
     connection_factory: Callable[[], Any],
     gate_config: Dict[str, Any],
@@ -1618,6 +1677,12 @@ def build_project_compatibility_gates(
         warnings.extend(readiness_envelope.get("warnings") or [])
 
     gates: List[Dict[str, Any]] = []
+    for index, gate_config in enumerate(compatibility_gates.get("sentinel_maps") or [], 1):
+        if isinstance(gate_config, dict):
+            gates.append(_map_gate(connection_factory, gate_config, profile=profile, index=index))
+        else:
+            warnings.append(f"Skipping malformed sentinel_map gate: {gate_config!r}")
+
     for index, gate_config in enumerate(compatibility_gates.get("sentinel_asset_searches") or [], 1):
         if isinstance(gate_config, dict):
             gates.append(_asset_search_gate(connection_factory, gate_config, index=index))

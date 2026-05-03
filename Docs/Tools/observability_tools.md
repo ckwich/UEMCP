@@ -359,7 +359,7 @@ The response includes:
 - `profile_name` and `profile_source`, so callers can prove whether the profile came from `UEMCP_PROFILE_DIR`, `.uemcp.local`, or packaged defaults.
 - `readiness`: one compact preflight gate for the whole project pack when `require_ready` is true.
 - `summary`: total, passed, failed, and successful counts across all compatibility gates.
-- `gates`: compact per-gate evidence. Current generic gate kinds are `sentinel_asset_search`, `sentinel_blueprint`, and `automation_prefix`.
+- `gates`: compact per-gate evidence. Current generic gate kinds are `sentinel_map`, `sentinel_asset_search`, `sentinel_blueprint`, and `automation_prefix`.
 - `observability_events`: one `compatibility_gate_failed` event per failed gate. Successful runs return an empty list.
 - `evidence_refs`: request ids for readiness and each live gate.
 
@@ -367,6 +367,12 @@ Supported profile schema under `compatibility_gates`:
 
 ```json
 {
+  "sentinel_maps": [
+    {
+      "name": "current_map_ready",
+      "expected_maps": ["/Game/Project/Maps/L_Test"]
+    }
+  ],
   "sentinel_asset_searches": [
     {
       "name": "core_blueprints",
@@ -395,6 +401,8 @@ Supported profile schema under `compatibility_gates`:
   ]
 }
 ```
+
+`sentinel_maps` reads `get_editor_status.current_map` and passes when the current map is one of `expected_maps`. A singular `expected_map` is also accepted. If neither field is present, the gate falls back to the profile's top-level `known_maps`.
 
 When `automation_prefixes` is omitted, the runner uses top-level `automation_test_prefixes` as compatibility gates. Empty project packs are treated as unsuccessful because they do not prove compatibility.
 
