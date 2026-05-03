@@ -1882,9 +1882,14 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
                     "sentinel_level_snapshots": [
                         {
                             "name": "example_level_snapshot",
+                            "class_name": "BP_ExampleAnchor_C",
+                            "include_components": True,
+                            "component_limit": 10,
                             "min_total_actor_count": 2,
+                            "min_matched_actor_count": 2,
                             "expected_actor_names": ["MissingAnchor"],
                             "expected_actor_classes": ["BP_MissingAnchor_C"],
+                            "expected_component_names": ["MissingComponent"],
                         }
                     ]
                 },
@@ -1911,8 +1916,19 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
                     "matched_actor_count": 1,
                     "returned_actor_count": 1,
                     "truncated": False,
-                    "actors": [{"name": "OtherActor", "class": "StaticMeshActor"}],
-                    "filters": {"limit": 100},
+                    "actors": [
+                        {
+                            "name": "OtherActor",
+                            "class": "StaticMeshActor",
+                            "components": [{"name": "OtherComponent"}],
+                        }
+                    ],
+                    "filters": {
+                        "limit": 100,
+                        "class_name": "BP_ExampleAnchor_C",
+                        "include_components": True,
+                        "component_limit": 10,
+                    },
                 },
             },
         ]
@@ -1936,7 +1952,9 @@ def test_build_project_compatibility_gates_reports_level_snapshot_mismatch(
     assert gate["ok"] is False
     assert gate["missing_actor_names"] == ["MissingAnchor"]
     assert gate["missing_actor_classes"] == ["BP_MissingAnchor_C"]
+    assert gate["missing_component_names"] == ["MissingComponent"]
     assert "expected at least 2" in gate["message"]
+    assert "matched 1 actors, expected at least 2" in gate["message"]
     assert envelope["data"]["observability_events"][0]["type"] == "compatibility_gate_failed"
 
 

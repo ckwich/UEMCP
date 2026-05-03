@@ -1493,6 +1493,19 @@ def _actor_values(actors: List[Dict[str, Any]], fields: List[str]) -> List[str]:
     return values
 
 
+def _component_values(actors: List[Dict[str, Any]], fields: List[str]) -> List[str]:
+    values: List[str] = []
+    for actor in actors:
+        for component in actor.get("components") or []:
+            if not isinstance(component, dict):
+                continue
+            for field in fields:
+                value = component.get(field)
+                if value:
+                    values.append(str(value))
+    return values
+
+
 def _level_snapshot_gate(
     connection_factory: Callable[[], Any],
     gate_config: Dict[str, Any],
@@ -1520,6 +1533,7 @@ def _level_snapshot_gate(
     matched_actor_count = int(data.get("matched_actor_count") or len(actors))
     returned_actor_count = int(data.get("returned_actor_count") or len(actors))
     min_total_actor_count = max(0, int(gate_config.get("min_total_actor_count") or 0))
+    min_matched_actor_count = max(0, int(gate_config.get("min_matched_actor_count") or 0))
 
     expected_actor_names = [
         str(actor_name)
@@ -1531,8 +1545,14 @@ def _level_snapshot_gate(
         for actor_class in gate_config.get("expected_actor_classes") or []
         if str(actor_class)
     ]
+    expected_component_names = [
+        str(component_name)
+        for component_name in gate_config.get("expected_component_names") or []
+        if str(component_name)
+    ]
     actor_names = set(_actor_values(actors, ["name", "label", "path"]))
     actor_classes = set(_actor_values(actors, ["class", "class_name", "class_path"]))
+    component_names = set(_component_values(actors, ["name", "path"]))
     missing_actor_names = [
         actor_name
         for actor_name in expected_actor_names
@@ -1542,6 +1562,11 @@ def _level_snapshot_gate(
         actor_class
         for actor_class in expected_actor_classes
         if actor_class not in actor_classes
+    ]
+    missing_component_names = [
+        component_name
+        for component_name in expected_component_names
+        if component_name not in component_names
     ]
 
     errors: List[str] = []
@@ -1553,10 +1578,17 @@ def _level_snapshot_gate(
             "Level snapshot reported "
             f"{total_actor_count} total actors, expected at least {min_total_actor_count}"
         )
+    if min_matched_actor_count and matched_actor_count < min_matched_actor_count:
+        errors.append(
+            "Level snapshot matched "
+            f"{matched_actor_count} actors, expected at least {min_matched_actor_count}"
+        )
     if missing_actor_names:
         errors.append(f"Missing expected actor names: {', '.join(missing_actor_names)}")
     if missing_actor_classes:
         errors.append(f"Missing expected actor classes: {', '.join(missing_actor_classes)}")
+    if missing_component_names:
+        errors.append(f"Missing expected component names: {', '.join(missing_component_names)}")
     if data.get("truncated") and (missing_actor_names or missing_actor_classes):
         warnings.append("Level snapshot was truncated before all expected actors were found")
 
@@ -1576,10 +1608,13 @@ def _level_snapshot_gate(
         "returned_actor_count": returned_actor_count,
         "truncated": bool(data.get("truncated", False)),
         "filters": dict(data.get("filters") or {}),
+        "min_matched_actor_count": min_matched_actor_count,
         "expected_actor_names": expected_actor_names,
         "missing_actor_names": missing_actor_names,
         "expected_actor_classes": expected_actor_classes,
         "missing_actor_classes": missing_actor_classes,
+        "expected_component_names": expected_component_names,
+        "missing_component_names": missing_component_names,
     }
 
 
