@@ -312,16 +312,18 @@ def register_editor_tools(mcp: FastMCP):
         blueprint_name: str,
         actor_name: str,
         location: List[float] = [0.0, 0.0, 0.0],
-        rotation: List[float] = [0.0, 0.0, 0.0]
+        rotation: List[float] = [0.0, 0.0, 0.0],
+        scale: List[float] = [1.0, 1.0, 1.0]
     ) -> Dict[str, Any]:
-        """Spawn an actor from a Blueprint.
+        """Spawn an actor from a Blueprint name or long package path.
         
         Args:
             ctx: The MCP context
-            blueprint_name: Name of the Blueprint to spawn from
+            blueprint_name: Blueprint name under /Game/Blueprints or a long package path
             actor_name: Name to give the spawned actor
             location: The [x, y, z] world location to spawn at
             rotation: The [pitch, yaw, roll] rotation in degrees
+            scale: The [x, y, z] actor scale
             
         Returns:
             Dict containing the spawned actor's properties
@@ -339,11 +341,12 @@ def register_editor_tools(mcp: FastMCP):
                 "blueprint_name": blueprint_name,
                 "actor_name": actor_name,
                 "location": location or [0.0, 0.0, 0.0],
-                "rotation": rotation or [0.0, 0.0, 0.0]
+                "rotation": rotation or [0.0, 0.0, 0.0],
+                "scale": scale or [1.0, 1.0, 1.0]
             }
             
             # Validate location and rotation formats
-            for param_name in ["location", "rotation"]:
+            for param_name in ["location", "rotation", "scale"]:
                 param_value = params[param_name]
                 if not isinstance(param_value, list) or len(param_value) != 3:
                     logger.error(f"Invalid {param_name} format: {param_value}. Must be a list of 3 float values.")

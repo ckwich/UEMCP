@@ -2091,24 +2091,41 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'actor_name' parameter"));
     }
 
-    // Find the blueprint
-    if (BlueprintName.IsEmpty())
+    // Find the blueprint. Short names keep the original /Game/Blueprints behavior,
+    // while long package paths allow project-owned content roots.
+    const FString BlueprintReference = BlueprintName.TrimStartAndEnd();
+    if (BlueprintReference.IsEmpty())
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Blueprint name is empty"));
     }
 
-    FString Root      = TEXT("/Game/Blueprints/");
-    FString AssetPath = Root + BlueprintName;
-
-    if (!FPackageName::DoesPackageExist(AssetPath))
+    FString AssetPath = BlueprintReference;
+    if (!BlueprintReference.StartsWith(TEXT("/")))
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint '%s' not found – it must reside under /Game/Blueprints"), *BlueprintName));
+        AssetPath = FString::Printf(TEXT("/Game/Blueprints/%s"), *BlueprintReference);
     }
 
-    UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *AssetPath);
+    FString PackagePath = AssetPath;
+    FString ObjectPath = AssetPath;
+    int32 ObjectDelimiterIndex = INDEX_NONE;
+    if (AssetPath.FindChar(TEXT('.'), ObjectDelimiterIndex))
+    {
+        PackagePath = AssetPath.Left(ObjectDelimiterIndex);
+    }
+    else
+    {
+        ObjectPath = FString::Printf(TEXT("%s.%s"), *AssetPath, *FPackageName::GetShortName(AssetPath));
+    }
+
+    if (!FPackageName::DoesPackageExist(PackagePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint package not found: %s"), *PackagePath));
+    }
+
+    UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
     if (!Blueprint)
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *ObjectPath));
     }
 
     // Get transform parameters

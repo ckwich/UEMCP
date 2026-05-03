@@ -1,6 +1,19 @@
 import asyncio
+from pathlib import Path
 
 from unreal_mcp_server import mcp
+
+
+def _tool_schema(tool_name: str):
+    async def run_check():
+        return await mcp.list_tools()
+
+    tools = asyncio.run(run_check())
+    for tool in tools:
+        if tool.name == tool_name:
+            return tool.inputSchema
+
+    raise AssertionError(f"Tool not found: {tool_name}")
 
 
 def test_registered_tool_schemas_do_not_expose_context_parameter():
@@ -26,3 +39,29 @@ def test_python_only_tool_can_be_called_without_context_argument():
     result = asyncio.run(run_call())
 
     assert result[0].text
+
+
+def test_spawn_blueprint_actor_exposes_scale_for_level_replacement_workflows():
+    schema = _tool_schema("spawn_blueprint_actor")
+
+    properties = schema.get("properties") or {}
+    assert "scale" in properties
+    assert "scale" not in (schema.get("required") or [])
+
+
+def test_spawn_blueprint_actor_bridge_accepts_long_package_paths():
+    repo_root = Path(__file__).resolve().parents[2]
+    source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPEditorCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'BlueprintReference.StartsWith(TEXT("/"))' in source
+    assert "must reside under /Game/Blueprints" not in source

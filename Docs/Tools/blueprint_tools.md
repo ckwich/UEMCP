@@ -220,10 +220,10 @@ Set common Pawn properties on a Blueprint.
 
 ### spawn_blueprint_actor
 
-Spawn an actor from a Blueprint.
+Spawn an actor from a Blueprint short name or long package path.
 
 **Parameters:**
-- `blueprint_name` (string) - The name of the Blueprint to spawn
+- `blueprint_name` (string) - The Blueprint name under `/Game/Blueprints`, or a long package path such as `/Game/Project/Blueprints/BP_MyActor`
 - `actor_name` (string) - The name for the spawned actor
 - `location` (array, optional) - [X, Y, Z] coordinates for the actor's position, defaults to [0, 0, 0]
 - `rotation` (array, optional) - [Pitch, Yaw, Roll] values for the actor's rotation, defaults to [0, 0, 0]
@@ -237,7 +237,7 @@ Spawn an actor from a Blueprint.
 {
   "command": "spawn_blueprint_actor",
   "params": {
-    "blueprint_name": "MyActor",
+    "blueprint_name": "/Game/Project/Blueprints/BP_MyActor",
     "actor_name": "MyActorInstance",
     "location": [0, 0, 100],
     "rotation": [0, 45, 0],
