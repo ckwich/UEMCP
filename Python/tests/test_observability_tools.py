@@ -15,6 +15,7 @@ from tools.observability_tools import (
     build_observability_recent_events,
     build_observability_state_summary,
     build_output_log,
+    build_pie_runtime_snapshot,
     build_profile_automation_run,
     build_project_compatibility_gates,
     build_project_context,
@@ -648,6 +649,7 @@ def test_register_observability_tools_exposes_asset_registry_relationship_tools(
     register_observability_tools(recorder)
 
     assert "get_level_snapshot" in recorder.tools
+    assert "get_pie_runtime_snapshot" in recorder.tools
     assert "asset_search" in recorder.tools
     assert "asset_dependencies" in recorder.tools
     assert "asset_referencers" in recorder.tools
@@ -702,6 +704,53 @@ def test_build_level_snapshot_passes_bounded_filters_to_bridge():
                 "limit": 1000,
                 "class_name": "StaticMeshActor",
                 "name_contains": "Cover",
+                "include_components": True,
+                "component_limit": 1,
+            },
+        )
+    ]
+
+
+def test_build_pie_runtime_snapshot_passes_bounded_filters_to_bridge():
+    connection = FakeUnrealConnection(
+        {
+            "status": "success",
+            "result": {
+                "current_map": "/Game/Example/Maps/UEDPIE_0_L_Test",
+                "is_pie_running": True,
+                "world": {
+                    "name": "UEDPIE_0_L_Test",
+                    "world_type": "PIE",
+                },
+                "total_actor_count": 3,
+                "matched_actor_count": 1,
+                "returned_actor_count": 1,
+                "truncated": False,
+                "actors": [{"name": "BP_RuntimeTarget_0"}],
+            },
+        }
+    )
+
+    envelope = build_pie_runtime_snapshot(
+        lambda: connection,
+        pie_instance_index=-4,
+        limit=5000,
+        class_name="BP_RuntimeTarget",
+        name_contains="Runtime",
+        include_components=True,
+        component_limit=0,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["tool"] == "get_pie_runtime_snapshot"
+    assert connection.calls == [
+        (
+            "get_pie_runtime_snapshot",
+            {
+                "pie_instance_index": 0,
+                "limit": 1000,
+                "class_name": "BP_RuntimeTarget",
+                "name_contains": "Runtime",
                 "include_components": True,
                 "component_limit": 1,
             },

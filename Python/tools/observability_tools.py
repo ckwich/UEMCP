@@ -787,6 +787,39 @@ def build_level_snapshot(
     )
 
 
+def build_pie_runtime_snapshot(
+    connection_factory: Callable[[], Any] = _default_connection_factory,
+    *,
+    pie_instance_index: int = 0,
+    limit: int = 100,
+    class_name: Optional[str] = None,
+    name_contains: Optional[str] = None,
+    include_components: bool = False,
+    component_limit: int = 20,
+) -> Dict[str, Any]:
+    bounded_pie_instance_index = max(0, int(pie_instance_index))
+    bounded_limit = max(1, min(int(limit), 1000))
+    bounded_component_limit = max(1, min(int(component_limit), 1000))
+    params: Dict[str, Any] = {
+        "pie_instance_index": bounded_pie_instance_index,
+        "limit": bounded_limit,
+    }
+    if class_name:
+        params["class_name"] = class_name
+    if name_contains:
+        params["name_contains"] = name_contains
+    if include_components:
+        params["include_components"] = True
+        params["component_limit"] = bounded_component_limit
+
+    return execute_bridge_command(
+        tool="get_pie_runtime_snapshot",
+        command="get_pie_runtime_snapshot",
+        connection_factory=connection_factory,
+        params=params,
+    )
+
+
 def build_automation_tests(
     connection_factory: Callable[[], Any] = _default_connection_factory,
     *,
@@ -2082,6 +2115,25 @@ def register_observability_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """Return a bounded read-only snapshot of actors in the current editor level."""
         return build_level_snapshot(
+            limit=limit,
+            class_name=class_name,
+            name_contains=name_contains,
+            include_components=include_components,
+            component_limit=component_limit,
+        )
+
+    @mcp.tool()
+    def get_pie_runtime_snapshot(
+        pie_instance_index: int = 0,
+        limit: int = 100,
+        class_name: Optional[str] = None,
+        name_contains: Optional[str] = None,
+        include_components: bool = False,
+        component_limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Return a bounded read-only snapshot of actors in an active PIE runtime world."""
+        return build_pie_runtime_snapshot(
+            pie_instance_index=pie_instance_index,
             limit=limit,
             class_name=class_name,
             name_contains=name_contains,

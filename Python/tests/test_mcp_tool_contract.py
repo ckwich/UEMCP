@@ -101,3 +101,47 @@ def test_save_current_level_bridge_uses_editor_save_api():
 
     assert 'CommandType == TEXT("save_current_level")' in bridge_source
     assert "FEditorFileUtils::SaveLevel" in editor_source
+
+
+def test_pie_runtime_snapshot_is_exposed_as_separate_observability_tool():
+    schema = _tool_schema("get_pie_runtime_snapshot")
+
+    properties = schema.get("properties") or {}
+    assert {
+        "pie_instance_index",
+        "limit",
+        "class_name",
+        "name_contains",
+        "include_components",
+        "component_limit",
+    }.issubset(set(properties))
+    assert "pie_instance_index" not in (schema.get("required") or [])
+
+
+def test_pie_runtime_snapshot_bridge_targets_pie_worlds_explicitly():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+    editor_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPEditorCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'CommandType == TEXT("get_pie_runtime_snapshot")' in bridge_source
+    assert "EWorldType::PIE" in editor_source
+    assert "GetWorldContexts()" in editor_source

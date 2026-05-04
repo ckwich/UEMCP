@@ -15,6 +15,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Misc/FileHelper.h"
 #include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
 #include "Engine/Level.h"
 #include "Engine/Selection.h"
 #include "Engine/World.h"
@@ -159,6 +160,173 @@ namespace
         }
 
         return ActorObj;
+    }
+
+    TSharedPtr<FJsonObject> BuildLevelSnapshotForWorld(
+        UWorld* SnapshotWorld,
+        const TSharedPtr<FJsonObject>& Params,
+        const FString& SnapshotSource,
+        int32 RequestedPIEInstanceIndex,
+        int32 AvailablePIEWorldCount)
+    {
+        double RequestedLimit = 100.0;
+        if (Params->HasField(TEXT("limit")))
+        {
+            Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+        }
+        const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+
+        FString ClassName;
+        Params->TryGetStringField(TEXT("class_name"), ClassName);
+
+        FString NameContains;
+        Params->TryGetStringField(TEXT("name_contains"), NameContains);
+
+        bool bIncludeComponents = false;
+        Params->TryGetBoolField(TEXT("include_components"), bIncludeComponents);
+
+        double RequestedComponentLimit = 20.0;
+        if (Params->HasField(TEXT("component_limit")))
+        {
+            Params->TryGetNumberField(TEXT("component_limit"), RequestedComponentLimit);
+        }
+        const int32 ComponentLimit = FMath::Clamp(static_cast<int32>(RequestedComponentLimit), 1, 1000);
+
+        TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
+        FiltersObj->SetNumberField(TEXT("limit"), Limit);
+        FiltersObj->SetStringField(TEXT("snapshot_source"), SnapshotSource);
+        if (RequestedPIEInstanceIndex >= 0)
+        {
+            FiltersObj->SetNumberField(TEXT("pie_instance_index"), RequestedPIEInstanceIndex);
+        }
+        if (!ClassName.IsEmpty())
+        {
+            FiltersObj->SetStringField(TEXT("class_name"), ClassName);
+        }
+        if (!NameContains.IsEmpty())
+        {
+            FiltersObj->SetStringField(TEXT("name_contains"), NameContains);
+        }
+        FiltersObj->SetBoolField(TEXT("include_components"), bIncludeComponents);
+        if (bIncludeComponents)
+        {
+            FiltersObj->SetNumberField(TEXT("component_limit"), ComponentLimit);
+        }
+
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(SnapshotWorld, AActor::StaticClass(), AllActors);
+
+        int32 TotalActorCount = 0;
+        int32 MatchedActorCount = 0;
+        TArray<TSharedPtr<FJsonValue>> ActorValues;
+        for (AActor* Actor : AllActors)
+        {
+            if (!Actor)
+            {
+                continue;
+            }
+
+            ++TotalActorCount;
+
+            UClass* ActorClass = Actor->GetClass();
+            const FString ActorClassName = ActorClass ? ActorClass->GetName() : FString();
+            const FString ActorClassPath = ActorClass ? ActorClass->GetPathName() : FString();
+            if (!ClassName.IsEmpty() &&
+                !ActorClassName.Contains(ClassName, ESearchCase::IgnoreCase) &&
+                !ActorClassPath.Contains(ClassName, ESearchCase::IgnoreCase))
+            {
+                continue;
+            }
+
+            if (!NameContains.IsEmpty() &&
+                !Actor->GetName().Contains(NameContains, ESearchCase::IgnoreCase) &&
+                !Actor->GetActorLabel().Contains(NameContains, ESearchCase::IgnoreCase))
+            {
+                continue;
+            }
+
+            ++MatchedActorCount;
+            if (ActorValues.Num() < Limit)
+            {
+                ActorValues.Add(MakeShared<FJsonValueObject>(
+                    ActorToLevelSnapshotJson(Actor, bIncludeComponents, ComponentLimit)
+                ));
+            }
+        }
+
+        TSharedPtr<FJsonObject> WorldObj = MakeShared<FJsonObject>();
+        WorldObj->SetStringField(TEXT("name"), SnapshotWorld->GetName());
+        WorldObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(SnapshotWorld));
+        WorldObj->SetStringField(TEXT("world_type"), WorldTypeToString(SnapshotWorld->WorldType));
+        WorldObj->SetStringField(TEXT("path"), SnapshotWorld->GetPathName());
+        WorldObj->SetStringField(TEXT("snapshot_source"), SnapshotSource);
+        if (RequestedPIEInstanceIndex >= 0)
+        {
+            WorldObj->SetNumberField(TEXT("pie_instance_index"), RequestedPIEInstanceIndex);
+            WorldObj->SetNumberField(TEXT("available_pie_world_count"), AvailablePIEWorldCount);
+        }
+
+        TArray<TSharedPtr<FJsonValue>> Warnings;
+
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(SnapshotWorld));
+        ResultObj->SetStringField(TEXT("snapshot_source"), SnapshotSource);
+        ResultObj->SetBoolField(TEXT("is_pie_running"), GEditor && GEditor->PlayWorld != nullptr);
+        ResultObj->SetNumberField(TEXT("selected_actor_count"), GEditor ? GEditor->GetSelectedActorCount() : 0);
+        ResultObj->SetObjectField(TEXT("world"), WorldObj);
+        if (RequestedPIEInstanceIndex >= 0)
+        {
+            ResultObj->SetNumberField(TEXT("pie_instance_index"), RequestedPIEInstanceIndex);
+            ResultObj->SetNumberField(TEXT("available_pie_world_count"), AvailablePIEWorldCount);
+        }
+        ResultObj->SetNumberField(TEXT("total_actor_count"), TotalActorCount);
+        ResultObj->SetNumberField(TEXT("matched_actor_count"), MatchedActorCount);
+        ResultObj->SetNumberField(TEXT("returned_actor_count"), ActorValues.Num());
+        ResultObj->SetBoolField(TEXT("truncated"), MatchedActorCount > ActorValues.Num());
+        ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
+        ResultObj->SetArrayField(TEXT("actors"), ActorValues);
+        ResultObj->SetArrayField(TEXT("warnings"), Warnings);
+
+        return ResultObj;
+    }
+
+    UWorld* ResolvePIERuntimeWorld(int32 RequestedPIEInstanceIndex, int32& OutAvailablePIEWorldCount)
+    {
+        OutAvailablePIEWorldCount = 0;
+        UWorld* SelectedWorld = nullptr;
+
+        if (GEngine)
+        {
+            for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
+            {
+                UWorld* CandidateWorld = WorldContext.World();
+                if (!CandidateWorld || CandidateWorld->WorldType != EWorldType::PIE)
+                {
+                    continue;
+                }
+
+                if (OutAvailablePIEWorldCount == RequestedPIEInstanceIndex)
+                {
+                    SelectedWorld = CandidateWorld;
+                }
+                ++OutAvailablePIEWorldCount;
+            }
+        }
+
+        if (!SelectedWorld && OutAvailablePIEWorldCount == 0 && GEditor && GEditor->PlayWorld)
+        {
+            UWorld* PlayWorld = GEditor->PlayWorld;
+            if (PlayWorld->WorldType == EWorldType::PIE)
+            {
+                OutAvailablePIEWorldCount = 1;
+                if (RequestedPIEInstanceIndex == 0)
+                {
+                    SelectedWorld = PlayWorld;
+                }
+            }
+        }
+
+        return SelectedWorld;
     }
 
     FString AutomationEventTypeToString(EAutomationEventType EventType)
@@ -988,6 +1156,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleGetLevelSnapshot(Params);
     }
+    else if (CommandType == TEXT("get_pie_runtime_snapshot"))
+    {
+        return HandleGetPIERuntimeSnapshot(Params);
+    }
     else if (CommandType == TEXT("asset_search"))
     {
         return HandleAssetSearch(Params);
@@ -1186,108 +1358,38 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetLevelSnapshot(const T
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor world is unavailable"));
     }
 
-    double RequestedLimit = 100.0;
-    if (Params->HasField(TEXT("limit")))
+    return BuildLevelSnapshotForWorld(EditorWorld, Params, TEXT("editor"), -1, -1);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetPIERuntimeSnapshot(const TSharedPtr<FJsonObject>& Params)
+{
+    double RequestedPIEInstanceIndex = 0.0;
+    if (Params->HasField(TEXT("pie_instance_index")))
     {
-        Params->TryGetNumberField(TEXT("limit"), RequestedLimit);
+        Params->TryGetNumberField(TEXT("pie_instance_index"), RequestedPIEInstanceIndex);
     }
-    const int32 Limit = FMath::Clamp(static_cast<int32>(RequestedLimit), 1, 1000);
+    const int32 PIEInstanceIndex = FMath::Max(0, static_cast<int32>(RequestedPIEInstanceIndex));
 
-    FString ClassName;
-    Params->TryGetStringField(TEXT("class_name"), ClassName);
-
-    FString NameContains;
-    Params->TryGetStringField(TEXT("name_contains"), NameContains);
-
-    bool bIncludeComponents = false;
-    Params->TryGetBoolField(TEXT("include_components"), bIncludeComponents);
-
-    double RequestedComponentLimit = 20.0;
-    if (Params->HasField(TEXT("component_limit")))
+    int32 AvailablePIEWorldCount = 0;
+    UWorld* PIEWorld = ResolvePIERuntimeWorld(PIEInstanceIndex, AvailablePIEWorldCount);
+    if (!PIEWorld)
     {
-        Params->TryGetNumberField(TEXT("component_limit"), RequestedComponentLimit);
-    }
-    const int32 ComponentLimit = FMath::Clamp(static_cast<int32>(RequestedComponentLimit), 1, 1000);
-
-    TSharedPtr<FJsonObject> FiltersObj = MakeShared<FJsonObject>();
-    FiltersObj->SetNumberField(TEXT("limit"), Limit);
-    if (!ClassName.IsEmpty())
-    {
-        FiltersObj->SetStringField(TEXT("class_name"), ClassName);
-    }
-    if (!NameContains.IsEmpty())
-    {
-        FiltersObj->SetStringField(TEXT("name_contains"), NameContains);
-    }
-    FiltersObj->SetBoolField(TEXT("include_components"), bIncludeComponents);
-    if (bIncludeComponents)
-    {
-        FiltersObj->SetNumberField(TEXT("component_limit"), ComponentLimit);
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            FString::Printf(
+                TEXT("PIE runtime world is unavailable for pie_instance_index %d; available PIE worlds: %d"),
+                PIEInstanceIndex,
+                AvailablePIEWorldCount
+            )
+        );
     }
 
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(EditorWorld, AActor::StaticClass(), AllActors);
-
-    int32 TotalActorCount = 0;
-    int32 MatchedActorCount = 0;
-    TArray<TSharedPtr<FJsonValue>> ActorValues;
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-
-        ++TotalActorCount;
-
-        UClass* ActorClass = Actor->GetClass();
-        const FString ActorClassName = ActorClass ? ActorClass->GetName() : FString();
-        const FString ActorClassPath = ActorClass ? ActorClass->GetPathName() : FString();
-        if (!ClassName.IsEmpty() &&
-            !ActorClassName.Contains(ClassName, ESearchCase::IgnoreCase) &&
-            !ActorClassPath.Contains(ClassName, ESearchCase::IgnoreCase))
-        {
-            continue;
-        }
-
-        if (!NameContains.IsEmpty() &&
-            !Actor->GetName().Contains(NameContains, ESearchCase::IgnoreCase) &&
-            !Actor->GetActorLabel().Contains(NameContains, ESearchCase::IgnoreCase))
-        {
-            continue;
-        }
-
-        ++MatchedActorCount;
-        if (ActorValues.Num() < Limit)
-        {
-            ActorValues.Add(MakeShared<FJsonValueObject>(
-                ActorToLevelSnapshotJson(Actor, bIncludeComponents, ComponentLimit)
-            ));
-        }
-    }
-
-    TSharedPtr<FJsonObject> WorldObj = MakeShared<FJsonObject>();
-    WorldObj->SetStringField(TEXT("name"), EditorWorld->GetName());
-    WorldObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(EditorWorld));
-    WorldObj->SetStringField(TEXT("world_type"), WorldTypeToString(EditorWorld->WorldType));
-    WorldObj->SetStringField(TEXT("path"), EditorWorld->GetPathName());
-
-    TArray<TSharedPtr<FJsonValue>> Warnings;
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(EditorWorld));
-    ResultObj->SetBoolField(TEXT("is_pie_running"), GEditor && GEditor->PlayWorld != nullptr);
-    ResultObj->SetNumberField(TEXT("selected_actor_count"), GEditor ? GEditor->GetSelectedActorCount() : 0);
-    ResultObj->SetObjectField(TEXT("world"), WorldObj);
-    ResultObj->SetNumberField(TEXT("total_actor_count"), TotalActorCount);
-    ResultObj->SetNumberField(TEXT("matched_actor_count"), MatchedActorCount);
-    ResultObj->SetNumberField(TEXT("returned_actor_count"), ActorValues.Num());
-    ResultObj->SetBoolField(TEXT("truncated"), MatchedActorCount > ActorValues.Num());
-    ResultObj->SetObjectField(TEXT("filters"), FiltersObj);
-    ResultObj->SetArrayField(TEXT("actors"), ActorValues);
-    ResultObj->SetArrayField(TEXT("warnings"), Warnings);
-
-    return ResultObj;
+    return BuildLevelSnapshotForWorld(
+        PIEWorld,
+        Params,
+        TEXT("pie_runtime"),
+        PIEInstanceIndex,
+        AvailablePIEWorldCount
+    );
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAssetSearch(const TSharedPtr<FJsonObject>& Params)

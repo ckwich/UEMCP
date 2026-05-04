@@ -12,6 +12,7 @@
       "summarize_observability_state",
       "get_output_log",
       "get_level_snapshot",
+      "get_pie_runtime_snapshot",
       "asset_search",
       "asset_dependencies",
       "asset_referencers",
@@ -149,7 +150,15 @@
       "exposure": "mcp_registered",
       "bridge_command": true,
       "requires_explicit_user_intent": false,
-      "recommended_use": "Read a bounded actor and component snapshot from the currently loaded level."
+      "recommended_use": "Read a bounded actor and component snapshot from the current editor world."
+    },
+    "get_pie_runtime_snapshot": {
+      "category": "observability",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Read a bounded actor and component snapshot from an active PIE runtime world without relaxing editor automation readiness gates."
     },
     "asset_search": {
       "category": "observability",

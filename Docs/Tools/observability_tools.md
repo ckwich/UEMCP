@@ -144,6 +144,8 @@ Each entry includes `sequence`, `time_seconds`, `timestamp_utc`, `category`, `ve
 
 Returns a bounded read-only snapshot of actors in the current editor world. Use it after `get_editor_status` has proven the expected map is loaded and before project-specific automation needs evidence that level content is present.
 
+This remains an editor-world snapshot even while Play In Editor is running. Use `get_pie_runtime_snapshot` when the evidence must come from the duplicated PIE runtime world.
+
 Parameters:
 
 - `limit`: maximum actors returned, clamped from 1 to 1000.
@@ -155,7 +157,8 @@ Parameters:
 The response includes:
 
 - `current_map`, `is_pie_running`, and `selected_actor_count`.
-- `world`: editor-world name, current map, world type, and path.
+- `snapshot_source`: `editor`.
+- `world`: editor-world name, current map, world type, path, and snapshot source.
 - `total_actor_count`: valid actors in the editor world before filters.
 - `matched_actor_count`: actors matching the class/name filters before `limit`.
 - `returned_actor_count`: actors included in the returned array.
@@ -164,6 +167,28 @@ The response includes:
 - `actors`: bounded actor entries.
 
 Each actor includes `name`, editor `label`, `class`, `class_path`, object `path`, `level_name`, `hidden`, `location`, `rotation`, and `scale`. When component inclusion is enabled, the actor also reports component counts and bounded component identity.
+
+## get_pie_runtime_snapshot
+
+Returns a bounded read-only snapshot of actors in an active Play In Editor runtime world. This tool exists so callers can observe runtime-spawned or runtime-duplicated actors without weakening the existing automation readiness gate that blocks profile automation during PIE.
+
+Parameters:
+
+- `pie_instance_index`: zero-based PIE world index, clamped to 0 or higher. Defaults to 0.
+- `limit`: maximum actors returned, clamped from 1 to 1000.
+- `class_name`: optional actor class or class-path substring filter.
+- `name_contains`: optional actor name or editor-label substring filter.
+- `include_components`: when true, include bounded component identity for each returned actor.
+- `component_limit`: maximum components per actor when components are included, clamped from 1 to 1000.
+
+The response includes the same actor-count, filter, truncation, and actor entry shape as `get_level_snapshot`, plus:
+
+- `snapshot_source`: `pie_runtime`.
+- `pie_instance_index`: requested runtime world index.
+- `available_pie_world_count`: number of PIE worlds detected by Unreal world contexts.
+- `world`: PIE world name, current map, world type, path, snapshot source, requested index, and available PIE world count.
+
+When no matching PIE runtime world exists, the tool returns a structured error instead of falling back to the editor world. Readiness and automation tools still report `play_in_editor_running` / `editor_busy` during PIE.
 
 ## asset_search
 

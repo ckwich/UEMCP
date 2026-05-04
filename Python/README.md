@@ -31,6 +31,7 @@ The first supported UEMCP tools are read-mostly:
 - `get_editor_status`
 - `get_output_log`
 - `get_level_snapshot`
+- `get_pie_runtime_snapshot`
 - `asset_search`
 - `asset_dependencies`
 - `asset_referencers`
@@ -40,6 +41,8 @@ The first supported UEMCP tools are read-mostly:
 - `run_project_compatibility_gates`
 
 These tools return structured envelopes with request IDs, timing, editor identity, warnings, and categorized errors.
+
+`get_level_snapshot` intentionally observes the editor world. During Play In Editor, use `get_pie_runtime_snapshot` for a read-only actor/component snapshot from the active PIE runtime world; automation readiness gates still block mutation and automation while PIE is running.
 
 ## Testing Scripts
 

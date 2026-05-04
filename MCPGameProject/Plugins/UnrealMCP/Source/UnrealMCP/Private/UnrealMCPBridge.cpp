@@ -227,6 +227,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             else if (CommandType == TEXT("get_editor_status") ||
                      CommandType == TEXT("get_output_log") ||
                      CommandType == TEXT("get_level_snapshot") ||
+                     CommandType == TEXT("get_pie_runtime_snapshot") ||
                      CommandType == TEXT("asset_search") ||
                      CommandType == TEXT("asset_dependencies") ||
                      CommandType == TEXT("asset_referencers") ||
