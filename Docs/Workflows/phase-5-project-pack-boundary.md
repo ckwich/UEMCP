@@ -83,13 +83,13 @@ The audit scans tracked files for project-specific strings and allows them only 
 UEMCP sample smoke remains the public neutral gate. When `-PluginPath` points at a plugin under a different Unreal project, the smoke builds that plugin owner project before launching the target project so the attached plugin DLL is current:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
 ```
 
 Failstate pack smoke uses the project-owned profile directory. The smoke auto-runs `run_project_compatibility_gates` whenever this mounted profile directory is present:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
   -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `

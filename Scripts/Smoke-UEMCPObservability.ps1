@@ -17,7 +17,16 @@ $ScriptDir = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptDir
 
 if (-not $UeRoot) {
-    $DefaultUeRoot = "D:\Epic\UE_5.7"
+    if ($IsMacOS) {
+        $DefaultUeRoot = "/Users/Shared/Epic Games/UE_5.7"
+    }
+    elseif ($IsLinux) {
+        $DefaultUeRoot = "/opt/UnrealEngine/UE_5.7"
+    }
+    else {
+        $DefaultUeRoot = "D:\Epic\UE_5.7"
+    }
+
     if (Test-Path -LiteralPath $DefaultUeRoot) {
         $UeRoot = $DefaultUeRoot
     }
@@ -28,14 +37,30 @@ if (-not $UeRoot) {
 }
 
 if (-not $ProjectPath) {
-    $ProjectPath = Join-Path $RepoRoot "MCPGameProject\MCPGameProject.uproject"
+    $ProjectPath = Join-Path (Join-Path $RepoRoot "MCPGameProject") "MCPGameProject.uproject"
 }
 
-$DefaultProjectPath = Join-Path $RepoRoot "MCPGameProject\MCPGameProject.uproject"
-$DefaultPluginPath = Join-Path $RepoRoot "MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin"
+$DefaultProjectPath = Join-Path (Join-Path $RepoRoot "MCPGameProject") "MCPGameProject.uproject"
+$DefaultPluginPath = Join-Path (Join-Path (Join-Path (Join-Path $RepoRoot "MCPGameProject") "Plugins") "UnrealMCP") "UnrealMCP.uplugin"
 
-$EditorPath = Join-Path $UeRoot "Engine\Binaries\Win64\UnrealEditor.exe"
-$BuildPath = Join-Path $UeRoot "Engine\Build\BatchFiles\Build.bat"
+if ($IsMacOS) {
+    $BuildPlatform = "Mac"
+    $EditorPath = Join-Path $UeRoot "Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
+    if (-not (Test-Path -LiteralPath $EditorPath -PathType Leaf)) {
+        $EditorPath = Join-Path $UeRoot "Engine/Binaries/Mac/UnrealEditor"
+    }
+    $BuildPath = Join-Path $UeRoot "Engine/Build/BatchFiles/RunUBT.sh"
+}
+elseif ($IsLinux) {
+    $BuildPlatform = "Linux"
+    $EditorPath = Join-Path $UeRoot "Engine/Binaries/Linux/UnrealEditor"
+    $BuildPath = Join-Path $UeRoot "Engine/Build/BatchFiles/RunUBT.sh"
+}
+else {
+    $BuildPlatform = "Win64"
+    $EditorPath = Join-Path $UeRoot "Engine\Binaries\Win64\UnrealEditor.exe"
+    $BuildPath = Join-Path $UeRoot "Engine\Build\BatchFiles\Build.bat"
+}
 $PythonDir = Join-Path $RepoRoot "Python"
 
 foreach ($PathToCheck in @($EditorPath, $BuildPath, $ProjectPath, $PythonDir)) {
@@ -63,7 +88,7 @@ if ($PluginPath) {
 }
 
 if (-not $ResolvedPluginPath) {
-    $ProjectPluginPath = Join-Path (Split-Path -Parent $ResolvedProjectPath) "Plugins\UnrealMCP\UnrealMCP.uplugin"
+    $ProjectPluginPath = Join-Path (Join-Path (Join-Path (Split-Path -Parent $ResolvedProjectPath) "Plugins") "UnrealMCP") "UnrealMCP.uplugin"
     if (-not (Test-Path -LiteralPath $ProjectPluginPath -PathType Leaf) -and $ResolvedProjectPath -ne $ResolvedDefaultProjectPath) {
         throw "UEMCP plugin is not attached to this project. Pass -PluginPath '$DefaultPluginPath' to launch the repo plugin through Unreal's -PLUGIN switch, or install UnrealMCP under the project's Plugins folder."
     }
@@ -71,7 +96,7 @@ if (-not $ResolvedPluginPath) {
 
 if (-not $ProfileDir) {
     $ProjectRoot = Split-Path -Parent $ResolvedProjectPath
-    $ProjectPackProfileDir = Join-Path $ProjectRoot "Tools\UEMCP\profiles"
+    $ProjectPackProfileDir = Join-Path (Join-Path (Join-Path $ProjectRoot "Tools") "UEMCP") "profiles"
     if (Test-Path -LiteralPath $ProjectPackProfileDir -PathType Container) {
         $ProfileDir = $ProjectPackProfileDir
     }
@@ -85,13 +110,23 @@ if ($ProfileDir) {
     $ResolvedProfileDir = (Resolve-Path -LiteralPath $ProfileDir).Path
 }
 
-function Get-UemcpBridgeListener {
-    Get-NetTCPConnection `
-        -LocalAddress 127.0.0.1 `
-        -LocalPort $Port `
-        -State Listen `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+function Test-UemcpBridgeListener {
+    $Client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $Connect = $Client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $Connect.AsyncWaitHandle.WaitOne(1000, $false)) {
+            return $false
+        }
+
+        $Client.EndConnect($Connect)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $Client.Close()
+    }
 }
 
 function Find-PluginOwnerProjectPath([string]$PluginFilePath) {
@@ -117,6 +152,39 @@ function Find-PluginOwnerProjectPath([string]$PluginFilePath) {
     return $null
 }
 
+function Get-UemcpEditorTargetName([string]$ProjectFilePath) {
+    return "$([System.IO.Path]::GetFileNameWithoutExtension($ProjectFilePath))Editor"
+}
+
+function Invoke-UemcpEditorBuild([string]$ProjectFilePath, [string]$FailurePrefix) {
+    Write-Output "Building editor target for $ProjectFilePath with $BuildPath"
+    if ($BuildPlatform -eq "Win64") {
+        & $BuildPath `
+            Development `
+            $BuildPlatform `
+            "-Project=$ProjectFilePath" `
+            -TargetType=Editor `
+            -Progress `
+            -NoEngineChanges `
+            -NoHotReloadFromIDE
+    }
+    else {
+        $TargetName = Get-UemcpEditorTargetName $ProjectFilePath
+        & $BuildPath `
+            $TargetName `
+            $BuildPlatform `
+            Development `
+            "-Project=$ProjectFilePath" `
+            -Progress `
+            -NoEngineChanges `
+            -NoHotReloadFromIDE
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FailurePrefix failed with exit code $LASTEXITCODE."
+    }
+}
+
 if ($ResolvedPluginPath) {
     $PluginOwnerProjectPath = Find-PluginOwnerProjectPath $ResolvedPluginPath
     if ($PluginOwnerProjectPath) {
@@ -126,34 +194,10 @@ if ($ResolvedPluginPath) {
 
 if (-not $SkipBuild) {
     if ($ResolvedPluginOwnerProjectPath -and $ResolvedPluginOwnerProjectPath -ne $ResolvedProjectPath) {
-        Write-Output "Building plugin owner editor target for $ResolvedPluginOwnerProjectPath with $BuildPath"
-        & $BuildPath `
-            Development `
-            Win64 `
-            "-Project=$ResolvedPluginOwnerProjectPath" `
-            -TargetType=Editor `
-            -Progress `
-            -NoEngineChanges `
-            -NoHotReloadFromIDE
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Plugin owner editor target build failed with exit code $LASTEXITCODE."
-        }
+        Invoke-UemcpEditorBuild $ResolvedPluginOwnerProjectPath "Plugin owner editor target build"
     }
 
-    Write-Output "Building editor target for $ResolvedProjectPath with $BuildPath"
-    & $BuildPath `
-        Development `
-        Win64 `
-        "-Project=$ResolvedProjectPath" `
-        -TargetType=Editor `
-        -Progress `
-        -NoEngineChanges `
-        -NoHotReloadFromIDE
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Editor target build failed with exit code $LASTEXITCODE."
-    }
+    Invoke-UemcpEditorBuild $ResolvedProjectPath "Editor target build"
 }
 
 $LaunchedEditor = $null
@@ -174,13 +218,16 @@ try {
     }
     $env:UEMCP_PROFILE_NAME = $ProfileName
 
-    if (-not (Get-UemcpBridgeListener)) {
+    if (-not (Test-UemcpBridgeListener)) {
         if ($SkipLaunch) {
             throw "UEMCP bridge is not listening on 127.0.0.1:$Port and -SkipLaunch was passed."
         }
 
         Write-Output "Launching Unreal Editor for $ResolvedProjectPath"
         $EditorArgs = @($ResolvedProjectPath, "-log")
+        if ($IsMacOS -or $IsLinux) {
+            $EditorArgs += @("-stdout", "-FullStdOutLogOutput", "-nosplash", "-nop4", "-unattended", "-NullRHI")
+        }
         if ($ResolvedPluginPath) {
             Write-Output "Attaching UEMCP plugin with -PLUGIN=$ResolvedPluginPath"
             $EditorArgs += "-PLUGIN=$ResolvedPluginPath"
@@ -193,10 +240,10 @@ try {
     }
 
     $Deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
-    $Listener = $null
+    $BridgeIsListening = $false
     while ((Get-Date) -lt $Deadline) {
-        $Listener = Get-UemcpBridgeListener
-        if ($Listener) {
+        $BridgeIsListening = Test-UemcpBridgeListener
+        if ($BridgeIsListening) {
             break
         }
 
@@ -207,11 +254,11 @@ try {
         Start-Sleep -Seconds 2
     }
 
-    if (-not $Listener) {
+    if (-not $BridgeIsListening) {
         throw "Timed out waiting for UEMCP bridge on 127.0.0.1:$Port."
     }
 
-    Write-Output "UEMCP bridge listening on 127.0.0.1:$Port (PID $($Listener.OwningProcess))."
+    Write-Output "UEMCP bridge listening on 127.0.0.1:$Port."
 
     $env:UEMCP_SMOKE_EXPECTED_PROJECT = $ResolvedProjectPath
 

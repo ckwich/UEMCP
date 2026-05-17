@@ -4,7 +4,7 @@ Observability-first Python MCP bridge for interacting with Unreal Engine through
 
 ## Setup
 
-1. Make sure Python 3.10+ is installed
+1. Make sure Python 3.10 through 3.13 is installed
 2. Install `uv` if you haven't already:
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -21,7 +21,7 @@ Observability-first Python MCP bridge for interacting with Unreal Engine through
    uv sync --extra dev
    ```
 
-At this point, configure your MCP client to run `uv --directory C:/Dev/UEMCP/Python run unreal_mcp_server.py`.
+At this point, configure your MCP client to run `uv --directory Python run unreal_mcp_server.py` from the repo root. If your client does not launch from the repo root, use the absolute path to this checkout's `Python` directory.
 
 ## Observability Tools
 
@@ -64,18 +64,20 @@ uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
 For the live Unreal bridge gate, run from the repo root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
 ```
 
 Against the Failstate worktree, attach the UEMCP repo plugin without installing it into the game project:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
   -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
   -CloseLaunchedEditor
 ```
+
+On macOS, set `UEMCP_UE_ROOT` only if Unreal is not installed at `/Users/Shared/Epic Games/UE_5.7`. The smoke script uses `RunUBT.sh`, the Mac editor executable, and a TCP socket probe when running under PowerShell Core on macOS.
 
 ## Troubleshooting
 

@@ -77,7 +77,8 @@ All these capabilities are accessible through natural language commands via AI a
 
 ### Prerequisites
 - Unreal Engine 5.5+
-- Python 3.12+
+- Python 3.10 through 3.13
+- `uv`
 - MCP Client (e.g., Claude Desktop, Cursor, Windsurf)
 
 ### Sample project
@@ -85,12 +86,17 @@ All these capabilities are accessible through natural language commands via AI a
 For getting started quickly, feel free to use the starter project in `MCPGameProject`. This is a UE 5.5 Blank Starter Project with the `UnrealMCP.uplugin` already configured. 
 
 1. **Prepare the project**
-   - Right-click your .uproject file
-   - Generate Visual Studio project files
+   - Windows: right-click your `.uproject` file and generate Visual Studio project files
+   - macOS: make sure Xcode is installed and selected with `xcode-select -p`
 2. **Build the project (including the plugin)**
-   - Open solution (`.sln`)
-   - Choose `Development Editor` as your target.
-   - Build
+   - Windows: open the solution (`.sln`), choose `Development Editor`, and build
+   - macOS:
+     ```bash
+     "/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/RunUBT.sh" \
+       MCPGameProjectEditor Mac Development \
+       -Project="/path/to/UEMCP/MCPGameProject/MCPGameProject.uproject" \
+       -NoEngineChanges -NoHotReloadFromIDE
+     ```
 
 ### Plugin
 Otherwise, if you want to use the plugin in your existing project:
@@ -105,10 +111,8 @@ Otherwise, if you want to use the plugin in your existing project:
    - Restart editor when prompted
 
 3. **Build the plugin**
-   - Right-click your .uproject file
-   - Generate Visual Studio project files
-   - Open solution (`.sln)
-   - Build with your target platform and output settings
+   - Windows: generate Visual Studio project files, open the solution, and build with your target platform and output settings
+   - macOS: build the editor target through `Engine/Build/BatchFiles/RunUBT.sh`
 
 ### Python Server Setup
 
@@ -128,7 +132,7 @@ Use the following JSON for your mcp configuration based on your MCP client.
       "command": "uv",
       "args": [
         "--directory",
-        "<path/to/the/folder/PYTHON>",
+        "Python",
         "run",
         "unreal_mcp_server.py"
       ]
@@ -138,6 +142,9 @@ Use the following JSON for your mcp configuration based on your MCP client.
 ```
 
 An example is found in `mcp.json`
+
+If your MCP client does not launch from the repository root, replace `Python`
+with an absolute path to this checkout's `Python` directory.
 
 ### MCP Configuration Locations
 

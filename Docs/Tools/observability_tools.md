@@ -501,10 +501,10 @@ The packaged shareable Failstate example still describes:
 Use the repo smoke script to prove the editor-target build, bridge listener, and read-only observability tools against a running Unreal Editor:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
 ```
 
-The script defaults to `D:\Epic\UE_5.7`, builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, if `get_level_snapshot(limit=25)` violates its actor count bounds, if category/substring filtering returns entries outside the requested filter, or if `asset_search(root="/Game", limit=20)` returns assets outside `/Game` or outside the requested limit.
+The script defaults to `D:\Epic\UE_5.7` on Windows and `/Users/Shared/Epic Games/UE_5.7` on macOS. It builds `MCPGameProjectEditor`, launches `MCPGameProject.uproject` when the bridge is not already listening, waits for `127.0.0.1:55557`, and fails if any observability envelope is not `ok: true`, if `get_editor_status.project_path` does not match the sample project, if `diagnose_editor_automation_readiness` does not report `ready_for_automation: true`, if `get_output_log` returns no live entries, if `get_level_snapshot(limit=25)` violates its actor count bounds, if category/substring filtering returns entries outside the requested filter, or if `asset_search(root="/Game", limit=20)` returns assets outside `/Game` or outside the requested limit.
 
 When `-PluginPath` points at a plugin under a different Unreal project, the script builds that plugin owner project first so attached-plugin smoke runs exercise the current plugin source, not a stale DLL.
 
@@ -515,7 +515,7 @@ The script also calls `get_observability_recent_events(limit=50)` at the end and
 To prove the same read-only gate against Failstate without copying plugin files into the Failstate repo, attach the repo plugin through Unreal's supported `-PLUGIN=` switch:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
   -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `

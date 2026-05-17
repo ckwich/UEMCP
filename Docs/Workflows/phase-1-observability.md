@@ -114,7 +114,7 @@ For the Phase 5 contract, see
 
 Python/static gates:
 
-```powershell
+```bash
 uv run --extra dev pytest -q
 uv lock --check
 uv run python -c "from unreal_mcp_server import mcp; print(type(mcp).__name__)"
@@ -124,18 +124,20 @@ git diff --check
 Sample project live smoke:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
 ```
 
 Failstate live smoke:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Smoke-UEMCPObservability.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 `
   -ProjectPath 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Failstate.uproject' `
   -PluginPath 'C:\Dev\UEMCP\MCPGameProject\Plugins\UnrealMCP\UnrealMCP.uplugin' `
   -ProfileDir 'C:\Dev\Failstate\.worktrees\phase1-combat-shell\Tools\UEMCP\profiles' `
   -CloseLaunchedEditor
 ```
+
+On macOS, `pwsh` uses the same script. The script defaults to `/Users/Shared/Epic Games/UE_5.7`, builds with `RunUBT.sh`, launches `UnrealEditor.app/Contents/MacOS/UnrealEditor`, and probes the bridge with a portable TCP client.
 
 ## Phase 1 Closeout
 
