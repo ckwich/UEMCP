@@ -26,12 +26,12 @@ namespace
     constexpr int32 MaxLevelListLimit = 10000;
     constexpr int32 MaxLevelOperationLimit = 1000;
 
-    TSharedPtr<FJsonObject> ErrorResponse(const FString& Message)
+    TSharedPtr<FJsonObject> LevelErrorResponse(const FString& Message)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(Message);
     }
 
-    FString TrimTrailingSlashes(FString Value)
+    FString LevelTrimTrailingSlashes(FString Value)
     {
         while (Value.Len() > 1 && Value.EndsWith(TEXT("/")))
         {
@@ -40,29 +40,29 @@ namespace
         return Value;
     }
 
-    FString NormalizePackagePath(FString Path)
+    FString LevelNormalizePackagePath(FString Path)
     {
         Path = Path.TrimStartAndEnd();
         Path.ReplaceInline(TEXT("\\"), TEXT("/"));
-        return TrimTrailingSlashes(Path);
+        return LevelTrimTrailingSlashes(Path);
     }
 
-    bool HasWildcard(const FString& Value)
+    bool LevelHasWildcard(const FString& Value)
     {
         return Value.Contains(TEXT("*")) || Value.Contains(TEXT("?"));
     }
 
-    bool IsExactGamePackagePath(const FString& Path)
+    bool LevelIsExactGamePackagePath(const FString& Path)
     {
-        return Path.StartsWith(TEXT("/Game/")) && !HasWildcard(Path);
+        return Path.StartsWith(TEXT("/Game/")) && !LevelHasWildcard(Path);
     }
 
-    bool IsGameRootPath(const FString& Path)
+    bool LevelIsGameRootPath(const FString& Path)
     {
-        return (Path == TEXT("/Game") || Path.StartsWith(TEXT("/Game/"))) && !HasWildcard(Path);
+        return (Path == TEXT("/Game") || Path.StartsWith(TEXT("/Game/"))) && !LevelHasWildcard(Path);
     }
 
-    FString PackageLeafName(const FString& PackagePath)
+    FString LevelPackageLeafName(const FString& PackagePath)
     {
         FString Leaf = PackagePath;
         int32 SlashIndex = INDEX_NONE;
@@ -73,12 +73,12 @@ namespace
         return Leaf;
     }
 
-    FString ObjectPathFromPackagePath(const FString& PackagePath)
+    FString LevelObjectPathFromPackagePath(const FString& PackagePath)
     {
-        return FString::Printf(TEXT("%s.%s"), *PackagePath, *PackageLeafName(PackagePath));
+        return FString::Printf(TEXT("%s.%s"), *PackagePath, *LevelPackageLeafName(PackagePath));
     }
 
-    FString CurrentMapFromWorld(UWorld* World)
+    FString LevelCurrentMapFromWorld(UWorld* World)
     {
         if (!World)
         {
@@ -87,7 +87,7 @@ namespace
         return World->GetOutermost() ? World->GetOutermost()->GetName() : World->GetMapName();
     }
 
-    UWorld* ResolveEditorWorld(FString& OutError)
+    UWorld* ResolveLevelEditorWorld(FString& OutError)
     {
         if (!GEditor)
         {
@@ -122,7 +122,7 @@ namespace
         );
     }
 
-    TArray<TSharedPtr<FJsonValue>> StringsToJsonArray(const TArray<FString>& Strings)
+    TArray<TSharedPtr<FJsonValue>> LevelStringsToJsonArray(const TArray<FString>& Strings)
     {
         TArray<TSharedPtr<FJsonValue>> Values;
         Values.Reserve(Strings.Num());
@@ -133,7 +133,7 @@ namespace
         return Values;
     }
 
-    TArray<TSharedPtr<FJsonValue>> VectorToJsonArray(const FVector& Vector)
+    TArray<TSharedPtr<FJsonValue>> LevelVectorToJsonArray(const FVector& Vector)
     {
         TArray<TSharedPtr<FJsonValue>> Values;
         Values.Add(MakeShared<FJsonValueNumber>(Vector.X));
@@ -142,7 +142,7 @@ namespace
         return Values;
     }
 
-    TArray<TSharedPtr<FJsonValue>> RotatorToJsonArray(const FRotator& Rotator)
+    TArray<TSharedPtr<FJsonValue>> LevelRotatorToJsonArray(const FRotator& Rotator)
     {
         TArray<TSharedPtr<FJsonValue>> Values;
         Values.Add(MakeShared<FJsonValueNumber>(Rotator.Pitch));
@@ -266,7 +266,7 @@ namespace
 
     bool MapPackageExists(IAssetRegistry& AssetRegistry, const FString& PackagePath)
     {
-        const FString ObjectPath = ObjectPathFromPackagePath(PackagePath);
+        const FString ObjectPath = LevelObjectPathFromPackagePath(PackagePath);
         if (AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(ObjectPath)).IsValid())
         {
             return true;
@@ -295,12 +295,12 @@ namespace
         return nullptr;
     }
 
-    UEditorActorSubsystem* GetEditorActorSubsystem()
+    UEditorActorSubsystem* GetLevelEditorActorSubsystem()
     {
         return GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
     }
 
-    UEditorAssetSubsystem* GetEditorAssetSubsystem()
+    UEditorAssetSubsystem* GetLevelEditorAssetSubsystem()
     {
         return GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
     }
@@ -409,9 +409,9 @@ namespace
         Evidence->SetStringField(TEXT("class_path"), Actor->GetClass() ? Actor->GetClass()->GetPathName() : FString());
         Evidence->SetStringField(TEXT("path"), Actor->GetPathName());
         Evidence->SetStringField(TEXT("folder_path"), Actor->GetFolderPath().ToString());
-        Evidence->SetArrayField(TEXT("location"), VectorToJsonArray(Actor->GetActorLocation()));
-        Evidence->SetArrayField(TEXT("rotation"), RotatorToJsonArray(Actor->GetActorRotation()));
-        Evidence->SetArrayField(TEXT("scale"), VectorToJsonArray(Actor->GetActorScale3D()));
+        Evidence->SetArrayField(TEXT("location"), LevelVectorToJsonArray(Actor->GetActorLocation()));
+        Evidence->SetArrayField(TEXT("rotation"), LevelRotatorToJsonArray(Actor->GetActorRotation()));
+        Evidence->SetArrayField(TEXT("scale"), LevelVectorToJsonArray(Actor->GetActorScale3D()));
 
         TArray<FString> Tags;
         for (const FName& Tag : Actor->Tags)
@@ -419,7 +419,7 @@ namespace
             Tags.Add(Tag.ToString());
         }
         Tags.Sort();
-        Evidence->SetArrayField(TEXT("tags"), StringsToJsonArray(Tags));
+        Evidence->SetArrayField(TEXT("tags"), LevelStringsToJsonArray(Tags));
         return Evidence;
     }
 
@@ -495,7 +495,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleCommand(
         return HandleLevelValidateConstruction(Params);
     }
 
-    return ErrorResponse(FString::Printf(TEXT("Unknown level workflow command: %s"), *CommandType));
+    return LevelErrorResponse(FString::Printf(TEXT("Unknown level workflow command: %s"), *CommandType));
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelListMaps(
@@ -505,7 +505,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelListMaps(
     TArray<FString> Roots = GetStringArrayField(Params, TEXT("roots"));
     if (Roots.IsEmpty())
     {
-        return ErrorResponse(TEXT("level_list_maps requires roots"));
+        return LevelErrorResponse(TEXT("level_list_maps requires roots"));
     }
 
     int32 Limit = 500;
@@ -521,10 +521,10 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelListMaps(
     Filter.ClassPaths.Add(UWorld::StaticClass()->GetClassPathName());
     for (FString& Root : Roots)
     {
-        Root = NormalizePackagePath(Root);
-        if (!IsGameRootPath(Root))
+        Root = LevelNormalizePackagePath(Root);
+        if (!LevelIsGameRootPath(Root))
         {
-            return ErrorResponse(TEXT("roots must be exact /Game paths"));
+            return LevelErrorResponse(TEXT("roots must be exact /Game paths"));
         }
         Filter.PackagePaths.Add(*Root);
     }
@@ -561,7 +561,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelListMaps(
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetArrayField(TEXT("roots"), StringsToJsonArray(Roots));
+    ResultObj->SetArrayField(TEXT("roots"), LevelStringsToJsonArray(Roots));
     ResultObj->SetNumberField(TEXT("map_count"), Maps.Num());
     ResultObj->SetNumberField(TEXT("matched_map_count"), MatchedCount);
     ResultObj->SetBoolField(TEXT("truncated"), MatchedCount > Maps.Num());
@@ -577,20 +577,20 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
     FString PackagePath;
     if (!Params->TryGetStringField(TEXT("package_path"), PackagePath))
     {
-        return ErrorResponse(TEXT("Missing package_path"));
+        return LevelErrorResponse(TEXT("Missing package_path"));
     }
-    PackagePath = NormalizePackagePath(PackagePath);
-    if (!IsExactGamePackagePath(PackagePath))
+    PackagePath = LevelNormalizePackagePath(PackagePath);
+    if (!LevelIsExactGamePackagePath(PackagePath))
     {
-        return ErrorResponse(TEXT("package_path must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("package_path must be an exact /Game map package path"));
     }
 
     FString TemplatePath;
     Params->TryGetStringField(TEXT("template_path"), TemplatePath);
-    TemplatePath = NormalizePackagePath(TemplatePath);
-    if (!TemplatePath.IsEmpty() && !IsExactGamePackagePath(TemplatePath))
+    TemplatePath = LevelNormalizePackagePath(TemplatePath);
+    if (!TemplatePath.IsEmpty() && !LevelIsExactGamePackagePath(TemplatePath))
     {
-        return ErrorResponse(TEXT("template_path must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("template_path must be an exact /Game map package path"));
     }
 
     bool bSaveExisting = false;
@@ -603,10 +603,10 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
     Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
 
     FString WorldError;
-    UWorld* CurrentWorld = ResolveEditorWorld(WorldError);
+    UWorld* CurrentWorld = ResolveLevelEditorWorld(WorldError);
     if (!CurrentWorld)
     {
-        return ErrorResponse(WorldError);
+        return LevelErrorResponse(WorldError);
     }
 
     IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
@@ -615,15 +615,15 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
     const bool bExists = MapPackageExists(AssetRegistry, PackagePath);
     if (bExists && bFailIfExists)
     {
-        return ErrorResponse(FString::Printf(TEXT("Map package already exists: %s"), *PackagePath));
+        return LevelErrorResponse(FString::Printf(TEXT("Map package already exists: %s"), *PackagePath));
     }
 
     TArray<UPackage*> CurrentPackages = CollectWorldPackages(CurrentWorld, true);
     const TArray<FString> DirtyBefore = PackageNames(CurrentPackages, true);
     if (!DirtyBefore.IsEmpty() && !bSaveExisting)
     {
-        TSharedPtr<FJsonObject> ErrorObj = ErrorResponse(TEXT("Current editor map has dirty packages; pass save_existing=true to save before creating a new level"));
-        ErrorObj->SetArrayField(TEXT("dirty_packages"), StringsToJsonArray(DirtyBefore));
+        TSharedPtr<FJsonObject> ErrorObj = LevelErrorResponse(TEXT("Current editor map has dirty packages; pass save_existing=true to save before creating a new level"));
+        ErrorObj->SetArrayField(TEXT("dirty_packages"), LevelStringsToJsonArray(DirtyBefore));
         return ErrorObj;
     }
 
@@ -632,7 +632,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
     ResultObj->SetStringField(TEXT("template_path"), TemplatePath);
     ResultObj->SetBoolField(TEXT("dry_run"), bDryRun);
     ResultObj->SetBoolField(TEXT("exists_before"), bExists);
-    ResultObj->SetArrayField(TEXT("dirty_packages_before"), StringsToJsonArray(DirtyBefore));
+    ResultObj->SetArrayField(TEXT("dirty_packages_before"), LevelStringsToJsonArray(DirtyBefore));
 
     if (bDryRun)
     {
@@ -649,9 +649,9 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
         TArray<FString> DirtyBeforeSave;
         if (!SaveWorldPackages(CurrentWorld, true, true, DirtyBeforeSave, SavedExisting, DirtyAfterSave))
         {
-            return ErrorResponse(TEXT("Failed to save existing dirty map packages before creating new level"));
+            return LevelErrorResponse(TEXT("Failed to save existing dirty map packages before creating new level"));
         }
-        ResultObj->SetArrayField(TEXT("saved_existing_packages"), StringsToJsonArray(SavedExisting));
+        ResultObj->SetArrayField(TEXT("saved_existing_packages"), LevelStringsToJsonArray(SavedExisting));
     }
 
     UWorld* NewWorld = nullptr;
@@ -666,7 +666,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
 
     if (!NewWorld)
     {
-        return ErrorResponse(TEXT("Failed to create new editor level"));
+        return LevelErrorResponse(TEXT("Failed to create new editor level"));
     }
 
     bool bSaved = false;
@@ -676,18 +676,18 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelCreate(
         bSaved = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, PackagePath);
         if (!bSaved)
         {
-            return ErrorResponse(FString::Printf(TEXT("Failed to save new level: %s"), *PackagePath));
+            return LevelErrorResponse(FString::Printf(TEXT("Failed to save new level: %s"), *PackagePath));
         }
         SavedPackages.Add(PackagePath);
     }
 
     ResultObj->SetBoolField(TEXT("created"), true);
     ResultObj->SetBoolField(TEXT("saved"), bSaved);
-    ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(NewWorld));
-    ResultObj->SetArrayField(TEXT("saved_packages"), StringsToJsonArray(SavedPackages));
+    ResultObj->SetStringField(TEXT("current_map"), LevelCurrentMapFromWorld(NewWorld));
+    ResultObj->SetArrayField(TEXT("saved_packages"), LevelStringsToJsonArray(SavedPackages));
     ResultObj->SetArrayField(
         TEXT("dirty_packages_after"),
-        StringsToJsonArray(PackageNames(CollectWorldPackages(NewWorld, true), true))
+        LevelStringsToJsonArray(PackageNames(CollectWorldPackages(NewWorld, true), true))
     );
     return ResultObj;
 }
@@ -699,12 +699,12 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelOpen(
     FString PackagePath;
     if (!Params->TryGetStringField(TEXT("package_path"), PackagePath))
     {
-        return ErrorResponse(TEXT("Missing package_path"));
+        return LevelErrorResponse(TEXT("Missing package_path"));
     }
-    PackagePath = NormalizePackagePath(PackagePath);
-    if (!IsExactGamePackagePath(PackagePath))
+    PackagePath = LevelNormalizePackagePath(PackagePath);
+    if (!LevelIsExactGamePackagePath(PackagePath))
     {
-        return ErrorResponse(TEXT("package_path must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("package_path must be an exact /Game map package path"));
     }
 
     bool bSaveExisting = false;
@@ -713,27 +713,27 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelOpen(
     Params->TryGetBoolField(TEXT("require_exists"), bRequireExists);
 
     FString WorldError;
-    UWorld* CurrentWorld = ResolveEditorWorld(WorldError);
+    UWorld* CurrentWorld = ResolveLevelEditorWorld(WorldError);
     if (!CurrentWorld)
     {
-        return ErrorResponse(WorldError);
+        return LevelErrorResponse(WorldError);
     }
-    const FString CurrentMapBefore = CurrentMapFromWorld(CurrentWorld);
+    const FString CurrentMapBefore = LevelCurrentMapFromWorld(CurrentWorld);
 
     IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
         TEXT("AssetRegistry")
     ).Get();
     if (bRequireExists && !MapPackageExists(AssetRegistry, PackagePath))
     {
-        return ErrorResponse(FString::Printf(TEXT("Map package not found: %s"), *PackagePath));
+        return LevelErrorResponse(FString::Printf(TEXT("Map package not found: %s"), *PackagePath));
     }
 
     TArray<UPackage*> CurrentPackages = CollectWorldPackages(CurrentWorld, true);
     const TArray<FString> DirtyBefore = PackageNames(CurrentPackages, true);
     if (!DirtyBefore.IsEmpty() && !bSaveExisting)
     {
-        TSharedPtr<FJsonObject> ErrorObj = ErrorResponse(TEXT("Current editor map has dirty packages; pass save_existing=true to save before opening another level"));
-        ErrorObj->SetArrayField(TEXT("dirty_packages"), StringsToJsonArray(DirtyBefore));
+        TSharedPtr<FJsonObject> ErrorObj = LevelErrorResponse(TEXT("Current editor map has dirty packages; pass save_existing=true to save before opening another level"));
+        ErrorObj->SetArrayField(TEXT("dirty_packages"), LevelStringsToJsonArray(DirtyBefore));
         return ErrorObj;
     }
     if (!DirtyBefore.IsEmpty() && bSaveExisting)
@@ -743,22 +743,22 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelOpen(
         TArray<FString> DirtyBeforeSave;
         if (!SaveWorldPackages(CurrentWorld, true, true, DirtyBeforeSave, SavedExisting, DirtyAfterSave))
         {
-            return ErrorResponse(TEXT("Failed to save existing dirty map packages before opening level"));
+            return LevelErrorResponse(TEXT("Failed to save existing dirty map packages before opening level"));
         }
     }
 
     UWorld* OpenedWorld = UEditorLoadingAndSavingUtils::LoadMap(MapFilenameFromPackagePath(PackagePath));
     if (!OpenedWorld)
     {
-        return ErrorResponse(FString::Printf(TEXT("Failed to open map: %s"), *PackagePath));
+        return LevelErrorResponse(FString::Printf(TEXT("Failed to open map: %s"), *PackagePath));
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("opened"), true);
     ResultObj->SetStringField(TEXT("package_path"), PackagePath);
     ResultObj->SetStringField(TEXT("current_map_before"), CurrentMapBefore);
-    ResultObj->SetStringField(TEXT("current_map_after"), CurrentMapFromWorld(OpenedWorld));
-    ResultObj->SetArrayField(TEXT("dirty_packages_before"), StringsToJsonArray(DirtyBefore));
+    ResultObj->SetStringField(TEXT("current_map_after"), LevelCurrentMapFromWorld(OpenedWorld));
+    ResultObj->SetArrayField(TEXT("dirty_packages_before"), LevelStringsToJsonArray(DirtyBefore));
     return ResultObj;
 }
 
@@ -771,10 +771,10 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelSave(
     {
         Params->TryGetStringField(TEXT("package_path"), PackagePath);
     }
-    PackagePath = NormalizePackagePath(PackagePath);
-    if (!PackagePath.IsEmpty() && !IsExactGamePackagePath(PackagePath))
+    PackagePath = LevelNormalizePackagePath(PackagePath);
+    if (!PackagePath.IsEmpty() && !LevelIsExactGamePackagePath(PackagePath))
     {
-        return ErrorResponse(TEXT("package_path must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("package_path must be an exact /Game map package path"));
     }
 
     bool bOnlyIfDirty = true;
@@ -783,16 +783,16 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelSave(
     Params->TryGetBoolField(TEXT("include_external_actor_packages"), bIncludeExternalActorPackages);
 
     FString WorldError;
-    UWorld* World = ResolveEditorWorld(WorldError);
+    UWorld* World = ResolveLevelEditorWorld(WorldError);
     if (!World)
     {
-        return ErrorResponse(WorldError);
+        return LevelErrorResponse(WorldError);
     }
 
-    const FString CurrentMap = CurrentMapFromWorld(World);
+    const FString CurrentMap = LevelCurrentMapFromWorld(World);
     if (!PackagePath.IsEmpty() && CurrentMap != PackagePath)
     {
-        return ErrorResponse(FString::Printf(
+        return LevelErrorResponse(FString::Printf(
             TEXT("Requested package_path does not match current editor map. Current: %s Requested: %s"),
             *CurrentMap,
             *PackagePath
@@ -813,7 +813,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelSave(
 
     if (!bSaved)
     {
-        return ErrorResponse(FString::Printf(TEXT("Failed to save level packages for current map: %s"), *CurrentMap));
+        return LevelErrorResponse(FString::Printf(TEXT("Failed to save level packages for current map: %s"), *CurrentMap));
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
@@ -822,9 +822,9 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelSave(
     ResultObj->SetStringField(TEXT("package_path"), PackagePath);
     ResultObj->SetBoolField(TEXT("only_if_dirty"), bOnlyIfDirty);
     ResultObj->SetBoolField(TEXT("include_external_actor_packages"), bIncludeExternalActorPackages);
-    ResultObj->SetArrayField(TEXT("dirty_packages_before"), StringsToJsonArray(DirtyBefore));
-    ResultObj->SetArrayField(TEXT("saved_packages"), StringsToJsonArray(SavedPackages));
-    ResultObj->SetArrayField(TEXT("dirty_packages_after"), StringsToJsonArray(DirtyAfter));
+    ResultObj->SetArrayField(TEXT("dirty_packages_before"), LevelStringsToJsonArray(DirtyBefore));
+    ResultObj->SetArrayField(TEXT("saved_packages"), LevelStringsToJsonArray(SavedPackages));
+    ResultObj->SetArrayField(TEXT("dirty_packages_after"), LevelStringsToJsonArray(DirtyAfter));
     return ResultObj;
 }
 
@@ -834,16 +834,16 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
 {
     FString TargetMap;
     Params->TryGetStringField(TEXT("target_map"), TargetMap);
-    TargetMap = NormalizePackagePath(TargetMap);
-    if (!TargetMap.IsEmpty() && !IsExactGamePackagePath(TargetMap))
+    TargetMap = LevelNormalizePackagePath(TargetMap);
+    if (!TargetMap.IsEmpty() && !LevelIsExactGamePackagePath(TargetMap))
     {
-        return ErrorResponse(TEXT("target_map must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("target_map must be an exact /Game map package path"));
     }
 
     const TArray<TSharedPtr<FJsonValue>>* OperationValues = nullptr;
     if (!Params->TryGetArrayField(TEXT("operations"), OperationValues) || !OperationValues || OperationValues->IsEmpty())
     {
-        return ErrorResponse(TEXT("level_apply_construction_plan requires operations"));
+        return LevelErrorResponse(TEXT("level_apply_construction_plan requires operations"));
     }
 
     bool bOpenLevel = true;
@@ -856,17 +856,17 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
     Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
 
     FString WorldError;
-    UWorld* World = ResolveEditorWorld(WorldError);
+    UWorld* World = ResolveLevelEditorWorld(WorldError);
     if (!World)
     {
-        return ErrorResponse(WorldError);
+        return LevelErrorResponse(WorldError);
     }
 
     IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
         TEXT("AssetRegistry")
     ).Get();
 
-    const FString CurrentMapBefore = CurrentMapFromWorld(World);
+    const FString CurrentMapBefore = LevelCurrentMapFromWorld(World);
     bool bOpenedMap = false;
     bool bCreatedMap = false;
     if (!TargetMap.IsEmpty() && CurrentMapBefore != TargetMap && bOpenLevel && !bDryRun)
@@ -875,12 +875,12 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
         {
             if (!bCreateIfMissing)
             {
-                return ErrorResponse(FString::Printf(TEXT("Target map does not exist: %s"), *TargetMap));
+                return LevelErrorResponse(FString::Printf(TEXT("Target map does not exist: %s"), *TargetMap));
             }
             UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(false);
             if (!NewWorld || !UEditorLoadingAndSavingUtils::SaveMap(NewWorld, TargetMap))
             {
-                return ErrorResponse(FString::Printf(TEXT("Failed to create target map: %s"), *TargetMap));
+                return LevelErrorResponse(FString::Printf(TEXT("Failed to create target map: %s"), *TargetMap));
             }
             bCreatedMap = true;
         }
@@ -888,7 +888,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
         World = UEditorLoadingAndSavingUtils::LoadMap(MapFilenameFromPackagePath(TargetMap));
         if (!World)
         {
-            return ErrorResponse(FString::Printf(TEXT("Failed to open target map: %s"), *TargetMap));
+            return LevelErrorResponse(FString::Printf(TEXT("Failed to open target map: %s"), *TargetMap));
         }
         bOpenedMap = true;
     }
@@ -917,16 +917,16 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
         const TSharedPtr<FJsonObject> Operation = (*OperationValues)[Index]->AsObject();
         if (!Operation.IsValid())
         {
-            return ErrorResponse(TEXT("All level construction operations must be objects"));
+            return LevelErrorResponse(TEXT("All level construction operations must be objects"));
         }
 
         FString Op;
         Operation->TryGetStringField(TEXT("op"), Op);
         FString ActorName;
         Operation->TryGetStringField(TEXT("actor_name"), ActorName);
-        if (ActorName.IsEmpty() || HasWildcard(ActorName))
+        if (ActorName.IsEmpty() || LevelHasWildcard(ActorName))
         {
-            return ErrorResponse(TEXT("Every operation requires an exact actor_name"));
+            return LevelErrorResponse(TEXT("Every operation requires an exact actor_name"));
         }
 
         AActor* ExistingActor = FindActorByExactName(World, ActorName);
@@ -954,13 +954,13 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
                 continue;
             }
             TSharedPtr<FJsonObject> ActorInfo = ActorEvidence(ExistingActor);
-            UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem();
+            UEditorActorSubsystem* ActorSubsystem = GetLevelEditorActorSubsystem();
             const bool bDeleted = ActorSubsystem
                 ? ActorSubsystem->DestroyActor(ExistingActor)
                 : World->EditorDestroyActor(ExistingActor, true);
             if (!bDeleted)
             {
-                return ErrorResponse(FString::Printf(TEXT("Failed to delete actor: %s"), *ActorName));
+                return LevelErrorResponse(FString::Printf(TEXT("Failed to delete actor: %s"), *ActorName));
             }
             DeletedActors.Add(MakeShared<FJsonValueObject>(ActorInfo));
             continue;
@@ -979,7 +979,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
             if (!AssetPath.IsEmpty())
             {
                 UObject* Asset = nullptr;
-                if (UEditorAssetSubsystem* AssetSubsystem = GetEditorAssetSubsystem())
+                if (UEditorAssetSubsystem* AssetSubsystem = GetLevelEditorAssetSubsystem())
                 {
                     Asset = AssetSubsystem->LoadAsset(AssetPath);
                 }
@@ -988,7 +988,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
                     MissingSources.Add(AssetPath);
                     continue;
                 }
-                if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+                if (UEditorActorSubsystem* ActorSubsystem = GetLevelEditorActorSubsystem())
                 {
                     TargetActor = ActorSubsystem->SpawnActorFromObject(Asset, Location, Rotation);
                 }
@@ -1001,7 +1001,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
                     MissingSources.Add(ActorClassPath);
                     continue;
                 }
-                if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+                if (UEditorActorSubsystem* ActorSubsystem = GetLevelEditorActorSubsystem())
                 {
                     TargetActor = ActorSubsystem->SpawnActorFromClass(ActorClass, Location, Rotation);
                 }
@@ -1015,14 +1015,14 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
 
             if (!TargetActor)
             {
-                return ErrorResponse(FString::Printf(TEXT("Failed to create actor: %s"), *ActorName));
+                return LevelErrorResponse(FString::Printf(TEXT("Failed to create actor: %s"), *ActorName));
             }
             CreatedActors.Add(MakeShared<FJsonValueObject>(ActorEvidence(TargetActor)));
         }
 
         if (!TargetActor)
         {
-            return ErrorResponse(FString::Printf(TEXT("Actor not found for operation %s: %s"), *Op, *ActorName));
+            return LevelErrorResponse(FString::Printf(TEXT("Actor not found for operation %s: %s"), *Op, *ActorName));
         }
 
         TargetActor->Modify();
@@ -1060,7 +1060,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
         bSaved = SaveWorldPackages(World, true, true, DirtyBeforeSave, SavedPackages, DirtyAfterSave);
         if (!bSaved)
         {
-            return ErrorResponse(TEXT("Failed to save level after applying construction plan"));
+            return LevelErrorResponse(TEXT("Failed to save level after applying construction plan"));
         }
     }
 
@@ -1068,20 +1068,20 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelApplyConstru
     ResultObj->SetBoolField(TEXT("dry_run"), bDryRun);
     ResultObj->SetStringField(TEXT("target_map"), TargetMap);
     ResultObj->SetStringField(TEXT("current_map_before"), CurrentMapBefore);
-    ResultObj->SetStringField(TEXT("current_map_after"), CurrentMapFromWorld(World));
+    ResultObj->SetStringField(TEXT("current_map_after"), LevelCurrentMapFromWorld(World));
     ResultObj->SetBoolField(TEXT("opened_map"), bOpenedMap);
     ResultObj->SetBoolField(TEXT("created_map"), bCreatedMap);
     ResultObj->SetNumberField(TEXT("operation_count"), OperationCount);
-    ResultObj->SetArrayField(TEXT("would_create_actors"), StringsToJsonArray(WouldCreate));
-    ResultObj->SetArrayField(TEXT("would_update_actors"), StringsToJsonArray(WouldUpdate));
-    ResultObj->SetArrayField(TEXT("would_delete_actors"), StringsToJsonArray(WouldDelete));
-    ResultObj->SetArrayField(TEXT("missing_sources"), StringsToJsonArray(MissingSources));
+    ResultObj->SetArrayField(TEXT("would_create_actors"), LevelStringsToJsonArray(WouldCreate));
+    ResultObj->SetArrayField(TEXT("would_update_actors"), LevelStringsToJsonArray(WouldUpdate));
+    ResultObj->SetArrayField(TEXT("would_delete_actors"), LevelStringsToJsonArray(WouldDelete));
+    ResultObj->SetArrayField(TEXT("missing_sources"), LevelStringsToJsonArray(MissingSources));
     ResultObj->SetArrayField(TEXT("created_actors"), CreatedActors);
     ResultObj->SetArrayField(TEXT("updated_actors"), UpdatedActors);
     ResultObj->SetArrayField(TEXT("deleted_actors"), DeletedActors);
-    ResultObj->SetArrayField(TEXT("changed_packages"), StringsToJsonArray(PackageNames(CollectWorldPackages(World, true), true)));
-    ResultObj->SetArrayField(TEXT("saved_packages"), StringsToJsonArray(SavedPackages));
-    ResultObj->SetArrayField(TEXT("dirty_packages_after_save"), StringsToJsonArray(DirtyAfterSave));
+    ResultObj->SetArrayField(TEXT("changed_packages"), LevelStringsToJsonArray(PackageNames(CollectWorldPackages(World, true), true)));
+    ResultObj->SetArrayField(TEXT("saved_packages"), LevelStringsToJsonArray(SavedPackages));
+    ResultObj->SetArrayField(TEXT("dirty_packages_after_save"), LevelStringsToJsonArray(DirtyAfterSave));
     return ResultObj;
 }
 
@@ -1091,29 +1091,29 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelValidateCons
 {
     FString TargetMap;
     Params->TryGetStringField(TEXT("target_map"), TargetMap);
-    TargetMap = NormalizePackagePath(TargetMap);
-    if (!TargetMap.IsEmpty() && !IsExactGamePackagePath(TargetMap))
+    TargetMap = LevelNormalizePackagePath(TargetMap);
+    if (!TargetMap.IsEmpty() && !LevelIsExactGamePackagePath(TargetMap))
     {
-        return ErrorResponse(TEXT("target_map must be an exact /Game map package path"));
+        return LevelErrorResponse(TEXT("target_map must be an exact /Game map package path"));
     }
 
     const TArray<TSharedPtr<FJsonValue>>* ExpectedValues = nullptr;
     if (!Params->TryGetArrayField(TEXT("expected_actors"), ExpectedValues) || !ExpectedValues || ExpectedValues->IsEmpty())
     {
-        return ErrorResponse(TEXT("level_validate_construction requires expected_actors"));
+        return LevelErrorResponse(TEXT("level_validate_construction requires expected_actors"));
     }
 
     double LocationTolerance = 1.0;
     Params->TryGetNumberField(TEXT("location_tolerance"), LocationTolerance);
 
     FString WorldError;
-    UWorld* World = ResolveEditorWorld(WorldError);
+    UWorld* World = ResolveLevelEditorWorld(WorldError);
     if (!World)
     {
-        return ErrorResponse(WorldError);
+        return LevelErrorResponse(WorldError);
     }
 
-    const FString CurrentMap = CurrentMapFromWorld(World);
+    const FString CurrentMap = LevelCurrentMapFromWorld(World);
     TArray<TSharedPtr<FJsonValue>> Missing;
     TArray<TSharedPtr<FJsonValue>> Mismatched;
     TArray<TSharedPtr<FJsonValue>> Found;
@@ -1131,14 +1131,14 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelValidateCons
         const TSharedPtr<FJsonObject> Expected = ExpectedValue->AsObject();
         if (!Expected.IsValid())
         {
-            return ErrorResponse(TEXT("expected_actors entries must be objects"));
+            return LevelErrorResponse(TEXT("expected_actors entries must be objects"));
         }
 
         FString ActorName;
         Expected->TryGetStringField(TEXT("actor_name"), ActorName);
         if (ActorName.IsEmpty())
         {
-            return ErrorResponse(TEXT("expected actor entries require actor_name"));
+            return LevelErrorResponse(TEXT("expected actor entries require actor_name"));
         }
 
         AActor* Actor = FindActorByExactName(World, ActorName);
@@ -1202,7 +1202,7 @@ TSharedPtr<FJsonObject> FUnrealMCPLevelWorkflowCommands::HandleLevelValidateCons
         }
         else
         {
-            Evidence->SetArrayField(TEXT("mismatches"), StringsToJsonArray(ActorMismatches));
+            Evidence->SetArrayField(TEXT("mismatches"), LevelStringsToJsonArray(ActorMismatches));
             Mismatched.Add(MakeShared<FJsonValueObject>(Evidence));
         }
     }
