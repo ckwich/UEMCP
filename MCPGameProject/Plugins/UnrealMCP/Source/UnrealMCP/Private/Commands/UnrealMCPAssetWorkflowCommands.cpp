@@ -42,7 +42,7 @@ namespace
 {
     constexpr int32 MaxAssetIntakeSnapshotLimit = 10000;
 
-    FString TrimTrailingSlashes(FString Value)
+    FString AssetWorkflowTrimTrailingSlashes(FString Value)
     {
         while (Value.Len() > 1 && Value.EndsWith(TEXT("/")))
         {
@@ -51,11 +51,11 @@ namespace
         return Value;
     }
 
-    FString NormalizeAssetRoot(const FString& RawRoot)
+    FString AssetWorkflowNormalizeAssetRoot(const FString& RawRoot)
     {
         FString Root = RawRoot.TrimStartAndEnd();
         Root.ReplaceInline(TEXT("\\"), TEXT("/"));
-        Root = TrimTrailingSlashes(Root);
+        Root = AssetWorkflowTrimTrailingSlashes(Root);
 
         if (Root.IsEmpty())
         {
@@ -100,7 +100,7 @@ namespace
         return TEXT("/Game/") + Root;
     }
 
-    FString AssetClassShortName(const FString& AssetClassPath)
+    FString AssetWorkflowAssetClassShortName(const FString& AssetClassPath)
     {
         FString ShortName = AssetClassPath;
 
@@ -158,7 +158,7 @@ namespace
     {
         Path = Path.TrimStartAndEnd();
         Path.ReplaceInline(TEXT("\\"), TEXT("/"));
-        return TrimTrailingSlashes(Path);
+        return AssetWorkflowTrimTrailingSlashes(Path);
     }
 
     FString JoinPackagePath(const FString& ParentPath, const FString& LeafName)
@@ -188,7 +188,7 @@ namespace
         return GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
     }
 
-    UEditorActorSubsystem* GetEditorActorSubsystem()
+    UEditorActorSubsystem* GetAssetWorkflowEditorActorSubsystem()
     {
         return GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
     }
@@ -207,7 +207,7 @@ namespace
 
     TArray<TSharedPtr<FJsonValue>> StringsToJsonArray(const TArray<FString>& Values);
 
-    TArray<TSharedPtr<FJsonValue>> VectorToJsonArray(const FVector& Vector)
+    TArray<TSharedPtr<FJsonValue>> AssetWorkflowVectorToJsonArray(const FVector& Vector)
     {
         TArray<TSharedPtr<FJsonValue>> Values;
         Values.Add(MakeShared<FJsonValueNumber>(Vector.X));
@@ -431,7 +431,7 @@ namespace
     )
     {
         const FString AssetClassPath = AssetData.AssetClassPath.ToString();
-        const FString AssetClass = AssetClassShortName(AssetClassPath);
+        const FString AssetClass = AssetWorkflowAssetClassShortName(AssetClassPath);
 
         TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
         AssetObj->SetStringField(TEXT("asset_name"), AssetData.AssetName.ToString());
@@ -460,7 +460,7 @@ namespace
         return AssetObj;
     }
 
-    UWorld* ResolveEditorWorld(FString& OutError)
+    UWorld* ResolveAssetWorkflowEditorWorld(FString& OutError)
     {
         if (!GEditor)
         {
@@ -487,7 +487,7 @@ namespace
         return nullptr;
     }
 
-    FString CurrentMapFromWorld(UWorld* World)
+    FString AssetWorkflowCurrentMapFromWorld(UWorld* World)
     {
         if (!World)
         {
@@ -498,10 +498,10 @@ namespace
 
     bool TargetMapMatches(UWorld* World, const FString& TargetMap)
     {
-        return TargetMap.IsEmpty() || CurrentMapFromWorld(World).Equals(TargetMap, ESearchCase::IgnoreCase);
+        return TargetMap.IsEmpty() || AssetWorkflowCurrentMapFromWorld(World).Equals(TargetMap, ESearchCase::IgnoreCase);
     }
 
-    AActor* FindActorByName(UWorld* World, const FString& ActorName)
+    AActor* FindAssetWorkflowActorByName(UWorld* World, const FString& ActorName)
     {
         if (!World || ActorName.IsEmpty())
         {
@@ -520,7 +520,7 @@ namespace
         return nullptr;
     }
 
-    void MarkActorLevelDirty(AActor* Actor)
+    void MarkAssetWorkflowActorLevelDirty(AActor* Actor)
     {
         if (!Actor)
         {
@@ -576,9 +576,9 @@ namespace
         TSharedPtr<FJsonObject> PlacementObj = MakeShared<FJsonObject>();
         PlacementObj->SetStringField(TEXT("asset_path"), AssetPath);
         PlacementObj->SetStringField(TEXT("actor_name"), ActorName);
-        PlacementObj->SetArrayField(TEXT("location"), VectorToJsonArray(Location));
-        PlacementObj->SetArrayField(TEXT("rotation"), VectorToJsonArray(FVector(Rotation.Pitch, Rotation.Yaw, Rotation.Roll)));
-        PlacementObj->SetArrayField(TEXT("scale"), VectorToJsonArray(Scale));
+        PlacementObj->SetArrayField(TEXT("location"), AssetWorkflowVectorToJsonArray(Location));
+        PlacementObj->SetArrayField(TEXT("rotation"), AssetWorkflowVectorToJsonArray(FVector(Rotation.Pitch, Rotation.Yaw, Rotation.Roll)));
+        PlacementObj->SetArrayField(TEXT("scale"), AssetWorkflowVectorToJsonArray(Scale));
         return PlacementObj;
     }
 }
@@ -655,7 +655,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetIntakeSnapsh
     TSet<FString> SeenRoots;
     for (const FString& RawRoot : RawRoots)
     {
-        const FString PackageRoot = NormalizeAssetRoot(RawRoot);
+        const FString PackageRoot = AssetWorkflowNormalizeAssetRoot(RawRoot);
         if (!PackageRoot.IsEmpty() && !SeenRoots.Contains(PackageRoot))
         {
             SeenRoots.Add(PackageRoot);
@@ -732,7 +732,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetIntakeSnapsh
         SeenObjectPaths.Add(ObjectPath);
 
         const FString AssetClassPath = AssetData.AssetClassPath.ToString();
-        const FString AssetClass = AssetClassShortName(AssetClassPath);
+        const FString AssetClass = AssetWorkflowAssetClassShortName(AssetClassPath);
         if (!AssetClassMatches(ClassFilters, AssetClass, AssetClassPath))
         {
             continue;
@@ -1285,7 +1285,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPrepareForLe
     ResultObj->SetStringField(TEXT("object_path"), Asset->GetPathName());
     ResultObj->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
     ResultObj->SetBoolField(TEXT("loadable"), true);
-    ResultObj->SetArrayField(TEXT("recommended_scale"), VectorToJsonArray(FVector(1.0f, 1.0f, 1.0f)));
+    ResultObj->SetArrayField(TEXT("recommended_scale"), AssetWorkflowVectorToJsonArray(FVector(1.0f, 1.0f, 1.0f)));
 
     if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
     {
@@ -1304,8 +1304,8 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPrepareForLe
         }
 
         TSharedPtr<FJsonObject> BoundsObj = MakeShared<FJsonObject>();
-        BoundsObj->SetArrayField(TEXT("origin"), VectorToJsonArray(Bounds.Origin));
-        BoundsObj->SetArrayField(TEXT("box_extent"), VectorToJsonArray(Bounds.BoxExtent));
+        BoundsObj->SetArrayField(TEXT("origin"), AssetWorkflowVectorToJsonArray(Bounds.Origin));
+        BoundsObj->SetArrayField(TEXT("box_extent"), AssetWorkflowVectorToJsonArray(Bounds.BoxExtent));
         BoundsObj->SetNumberField(TEXT("sphere_radius"), Bounds.SphereRadius);
 
         ResultObj->SetStringField(TEXT("placement_kind"), TEXT("static_mesh_actor"));
@@ -1486,7 +1486,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
     Params->TryGetBoolField(TEXT("save_level"), bSaveLevel);
 
     FString WorldError;
-    UWorld* World = ResolveEditorWorld(WorldError);
+    UWorld* World = ResolveAssetWorkflowEditorWorld(WorldError);
     if (!World)
     {
         return ErrorResponse(WorldError);
@@ -1495,7 +1495,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
     {
         return ErrorResponse(FString::Printf(
             TEXT("Current map '%s' does not match requested target_map '%s'"),
-            *CurrentMapFromWorld(World),
+            *AssetWorkflowCurrentMapFromWorld(World),
             *TargetMap
         ));
     }
@@ -1548,7 +1548,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
             continue;
         }
 
-        if (FindActorByName(World, ActorName))
+        if (FindAssetWorkflowActorByName(World, ActorName))
         {
             return ErrorResponse(FString::Printf(TEXT("Actor already exists in level: %s"), *ActorName));
         }
@@ -1562,7 +1562,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
         AActor* NewActor = nullptr;
         if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
         {
-            if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+            if (UEditorActorSubsystem* ActorSubsystem = GetAssetWorkflowEditorActorSubsystem())
             {
                 NewActor = ActorSubsystem->SpawnActorFromClass(AStaticMeshActor::StaticClass(), Location, Rotation);
             }
@@ -1581,7 +1581,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
             {
                 return ErrorResponse(FString::Printf(TEXT("Blueprint is not an Actor Blueprint: %s"), *AssetPath));
             }
-            if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+            if (UEditorActorSubsystem* ActorSubsystem = GetAssetWorkflowEditorActorSubsystem())
             {
                 NewActor = ActorSubsystem->SpawnActorFromClass(TSubclassOf<AActor>(Blueprint->GeneratedClass), Location, Rotation);
             }
@@ -1607,7 +1607,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
         NewActor->SetActorTransform(Transform);
         NewActor->PostEditMove(true);
         NewActor->PostEditChange();
-        MarkActorLevelDirty(NewActor);
+        MarkAssetWorkflowActorLevelDirty(NewActor);
         CreatedActors.Add(FUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true));
     }
 
@@ -1631,7 +1631,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetPlaceInLevel
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("dry_run"), bDryRun);
-    ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(World));
+    ResultObj->SetStringField(TEXT("current_map"), AssetWorkflowCurrentMapFromWorld(World));
     ResultObj->SetStringField(TEXT("target_map"), TargetMap);
     ResultObj->SetArrayField(TEXT("placements"), ObjectArrayToJsonArray(PlannedPlacements));
     ResultObj->SetArrayField(TEXT("created_actors"), ObjectArrayToJsonArray(CreatedActors));
@@ -1655,7 +1655,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetValidateLeve
     FString TargetMap;
     Params->TryGetStringField(TEXT("target_map"), TargetMap);
     FString WorldError;
-    UWorld* World = ResolveEditorWorld(WorldError);
+    UWorld* World = ResolveAssetWorkflowEditorWorld(WorldError);
     if (!World)
     {
         return ErrorResponse(WorldError);
@@ -1664,7 +1664,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetValidateLeve
     {
         return ErrorResponse(FString::Printf(
             TEXT("Current map '%s' does not match requested target_map '%s'"),
-            *CurrentMapFromWorld(World),
+            *AssetWorkflowCurrentMapFromWorld(World),
             *TargetMap
         ));
     }
@@ -1674,7 +1674,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetValidateLeve
     TArray<TSharedPtr<FJsonObject>> FoundActorObjects;
     for (const FString& ExpectedActor : ExpectedActors)
     {
-        if (AActor* Actor = FindActorByName(World, ExpectedActor))
+        if (AActor* Actor = FindAssetWorkflowActorByName(World, ExpectedActor))
         {
             FoundActors.Add(ExpectedActor);
             FoundActorObjects.Add(FUnrealMCPCommonUtils::ActorToJsonObject(Actor, false));
@@ -1686,7 +1686,7 @@ TSharedPtr<FJsonObject> FUnrealMCPAssetWorkflowCommands::HandleAssetValidateLeve
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("current_map"), CurrentMapFromWorld(World));
+    ResultObj->SetStringField(TEXT("current_map"), AssetWorkflowCurrentMapFromWorld(World));
     ResultObj->SetStringField(TEXT("target_map"), TargetMap);
     ResultObj->SetArrayField(TEXT("expected_actors"), StringsToJsonArray(ExpectedActors));
     ResultObj->SetArrayField(TEXT("found_actors"), StringsToJsonArray(FoundActors));
