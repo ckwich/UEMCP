@@ -6,6 +6,7 @@
 #include "Interfaces/IPv4/IPv4Address.h"
 
 class UUnrealMCPBridge;
+class FJsonObject;
 
 /**
  * Runnable class for the MCP server thread
@@ -23,12 +24,24 @@ public:
 	virtual void Exit() override;
 
 protected:
-	void HandleClientConnection(TSharedPtr<FSocket> ClientSocket);
-	void ProcessMessage(TSharedPtr<FSocket> Client, const FString& Message);
-
 private:
+	enum class EReadJsonMessageResult
+	{
+		Complete,
+		Disconnected,
+		Error
+	};
+
+	EReadJsonMessageResult ReadCompleteJsonMessage(
+		TSharedPtr<FJsonObject>& OutJsonObject,
+		FString& OutMessageText,
+		FString& OutError
+	);
+	void ProcessJsonCommand(const TSharedPtr<FJsonObject>& JsonObject, const FString& ReceivedText);
+	bool SendUtf8Response(const FString& Response);
+
 	UUnrealMCPBridge* Bridge;
 	TSharedPtr<FSocket> ListenerSocket;
 	TSharedPtr<FSocket> ClientSocket;
 	bool bRunning;
-}; 
+};

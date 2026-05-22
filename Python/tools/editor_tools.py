@@ -11,11 +11,27 @@ from mcp.server.fastmcp import FastMCP, Context
 # Get logger
 logger = logging.getLogger("UnrealMCP")
 
+def bridge_error_response(command: str, message: str) -> Dict[str, Any]:
+    """Build a consistent error envelope for legacy editor tools."""
+    return {
+        "status": "error",
+        "error": message,
+        "command": command,
+    }
+
+
+def bridge_response_or_error(command: str, response: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return the Unreal bridge response or an explicit transport error."""
+    if response:
+        return response
+    return bridge_error_response(command, "No response from Unreal Engine")
+
+
 def register_editor_tools(mcp: FastMCP):
     """Register editor tools with the MCP server."""
     
     @mcp.tool()
-    def get_actors_in_level(ctx: Context) -> List[Dict[str, Any]]:
+    def get_actors_in_level(ctx: Context) -> Dict[str, Any]:
         """Get a list of all actors in the current level."""
         from unreal_mcp_server import get_unreal_connection
         
@@ -23,36 +39,41 @@ def register_editor_tools(mcp: FastMCP):
             unreal = get_unreal_connection()
             if not unreal:
                 logger.warning("Failed to connect to Unreal Engine")
-                return []
+                return bridge_error_response("get_actors_in_level", "Failed to connect to Unreal Engine")
                 
             response = unreal.send_command("get_actors_in_level", {})
             
             if not response:
                 logger.warning("No response from Unreal Engine")
-                return []
-                
-            # Log the complete response for debugging
-            logger.info(f"Complete response from Unreal: {response}")
+                return bridge_error_response("get_actors_in_level", "No response from Unreal Engine")
             
             # Check response format
             if "result" in response and "actors" in response["result"]:
                 actors = response["result"]["actors"]
                 logger.info(f"Found {len(actors)} actors in level")
-                return actors
+                return {
+                    "status": "success",
+                    "actors": actors,
+                    "count": len(actors),
+                }
             elif "actors" in response:
                 actors = response["actors"]
                 logger.info(f"Found {len(actors)} actors in level")
-                return actors
+                return {
+                    "status": "success",
+                    "actors": actors,
+                    "count": len(actors),
+                }
                 
             logger.warning(f"Unexpected response format: {response}")
-            return []
+            return bridge_error_response("get_actors_in_level", "Unexpected response format from Unreal Engine")
             
         except Exception as e:
             logger.error(f"Error getting actors: {e}")
-            return []
+            return bridge_error_response("get_actors_in_level", str(e))
 
     @mcp.tool()
-    def find_actors_by_name(ctx: Context, pattern: str) -> List[str]:
+    def find_actors_by_name(ctx: Context, pattern: str) -> Dict[str, Any]:
         """Find actors by name pattern."""
         from unreal_mcp_server import get_unreal_connection
         
@@ -60,20 +81,36 @@ def register_editor_tools(mcp: FastMCP):
             unreal = get_unreal_connection()
             if not unreal:
                 logger.warning("Failed to connect to Unreal Engine")
-                return []
+                return bridge_error_response("find_actors_by_name", "Failed to connect to Unreal Engine")
                 
             response = unreal.send_command("find_actors_by_name", {
                 "pattern": pattern
             })
             
             if not response:
-                return []
-                
-            return response.get("actors", [])
+                return bridge_error_response("find_actors_by_name", "No response from Unreal Engine")
+
+            if "result" in response and "actors" in response["result"]:
+                actors = response["result"]["actors"]
+                return {
+                    "status": "success",
+                    "actors": actors,
+                    "count": len(actors),
+                }
+
+            if "actors" in response:
+                actors = response["actors"]
+                return {
+                    "status": "success",
+                    "actors": actors,
+                    "count": len(actors),
+                }
+
+            return bridge_response_or_error("find_actors_by_name", response)
             
         except Exception as e:
             logger.error(f"Error finding actors: {e}")
-            return []
+            return bridge_error_response("find_actors_by_name", str(e))
     
     @mcp.tool()
     def spawn_actor(
@@ -81,7 +118,8 @@ def register_editor_tools(mcp: FastMCP):
         name: str,
         type: str,
         location: List[float] = [0.0, 0.0, 0.0],
-        rotation: List[float] = [0.0, 0.0, 0.0]
+        rotation: List[float] = [0.0, 0.0, 0.0],
+        scale: List[float] = [1.0, 1.0, 1.0]
     ) -> Dict[str, Any]:
         """Create a new actor in the current level.
         
@@ -106,13 +144,14 @@ def register_editor_tools(mcp: FastMCP):
             # Ensure all parameters are properly formatted
             params = {
                 "name": name,
-                "type": type.upper(),  # Make sure type is uppercase
+                "type": type,
                 "location": location,
-                "rotation": rotation
+                "rotation": rotation,
+                "scale": scale,
             }
             
             # Validate location and rotation formats
-            for param_name in ["location", "rotation"]:
+            for param_name in ["location", "rotation", "scale"]:
                 param_value = params[param_name]
                 if not isinstance(param_value, list) or len(param_value) != 3:
                     logger.error(f"Invalid {param_name} format: {param_value}. Must be a list of 3 float values.")
@@ -157,11 +196,11 @@ def register_editor_tools(mcp: FastMCP):
             response = unreal.send_command("delete_actor", {
                 "name": name
             })
-            return response or {}
+            return bridge_response_or_error("delete_actor", response)
             
         except Exception as e:
             logger.error(f"Error deleting actor: {e}")
-            return {}
+            return bridge_error_response("delete_actor", str(e))
     
     @mcp.tool()
     def set_actor_transform(
@@ -189,15 +228,27 @@ def register_editor_tools(mcp: FastMCP):
                 params["scale"] = scale
                 
             response = unreal.send_command("set_actor_transform", params)
-            return response or {}
+            return bridge_response_or_error("set_actor_transform", response)
             
         except Exception as e:
             logger.error(f"Error setting transform: {e}")
-            return {}
+            return bridge_error_response("set_actor_transform", str(e))
     
     @mcp.tool()
-    def get_actor_properties(ctx: Context, name: str) -> Dict[str, Any]:
-        """Get all properties of an actor."""
+    def get_actor_properties(
+        ctx: Context,
+        name: str,
+        include_private: bool = False,
+        include_transient: bool = False,
+        include_config: bool = False,
+        include_non_editable: bool = False,
+        include_object_paths: bool = False,
+        property_limit: int = 64,
+        max_struct_depth: int = 3,
+        max_collection_items: int = 16,
+        name_contains: str = "",
+    ) -> Dict[str, Any]:
+        """Get bounded reflected properties of an actor."""
         from unreal_mcp_server import get_unreal_connection
         
         try:
@@ -207,13 +258,22 @@ def register_editor_tools(mcp: FastMCP):
                 return {"success": False, "message": "Failed to connect to Unreal Engine"}
                 
             response = unreal.send_command("get_actor_properties", {
-                "name": name
+                "name": name,
+                "include_private": include_private,
+                "include_transient": include_transient,
+                "include_config": include_config,
+                "include_non_editable": include_non_editable,
+                "include_object_paths": include_object_paths,
+                "property_limit": property_limit,
+                "max_struct_depth": max_struct_depth,
+                "max_collection_items": max_collection_items,
+                "name_contains": name_contains,
             })
-            return response or {}
+            return bridge_response_or_error("get_actor_properties", response)
             
         except Exception as e:
             logger.error(f"Error getting properties: {e}")
-            return {}
+            return bridge_error_response("get_actor_properties", str(e))
 
     @mcp.tool()
     def set_actor_property(
@@ -300,7 +360,7 @@ def register_editor_tools(mcp: FastMCP):
                 params["orientation"] = orientation
                 
             response = unreal.send_command("focus_viewport", params)
-            return response or {}
+            return bridge_response_or_error("focus_viewport", response)
             
         except Exception as e:
             logger.error(f"Error focusing viewport: {e}")
@@ -391,7 +451,7 @@ def register_editor_tools(mcp: FastMCP):
             response = unreal.send_command("save_current_level", {
                 "only_if_dirty": bool(only_if_dirty)
             })
-            return response or {}
+            return bridge_response_or_error("save_current_level", response)
 
         except Exception as e:
             error_msg = f"Error saving current level: {e}"

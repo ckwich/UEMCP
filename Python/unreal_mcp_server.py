@@ -25,6 +25,18 @@ UNREAL_PORT = 55557
 CONNECT_TIMEOUT_SECONDS = 5.0
 RECEIVE_TIMEOUT_SECONDS = 30.0
 AUTOMATION_COMMAND_GRACE_SECONDS = 15.0
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+def summarize_json_for_log(value: Any, max_chars: int = 800) -> str:
+    """Return a bounded JSON-ish representation for logs."""
+    try:
+        text = json.dumps(value, sort_keys=True, default=str)
+    except TypeError:
+        text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...<truncated {len(text) - max_chars} chars>"
 
 class UnrealConnection:
     """Connection to an Unreal Engine instance."""
@@ -119,6 +131,9 @@ class UnrealConnection:
                 
                 # Process the data received so far
                 data = b''.join(chunks)
+                if len(data) > MAX_RESPONSE_BYTES:
+                    raise Exception(f"Unreal response exceeded {MAX_RESPONSE_BYTES} bytes")
+
                 decoded_data = data.decode('utf-8')
                 
                 # Try to parse as JSON to check if complete
@@ -174,7 +189,12 @@ class UnrealConnection:
             
             # Send without newline, exactly like Unity
             command_json = json.dumps(command_obj)
-            logger.info(f"Sending command: {command_json}")
+            logger.info(
+                "Sending command '%s' (%d bytes, params=%s)",
+                command,
+                len(command_json.encode('utf-8')),
+                summarize_json_for_log(params or {}),
+            )
             self.socket.sendall(command_json.encode('utf-8'))
             
             # Read response using improved handler
@@ -184,8 +204,12 @@ class UnrealConnection:
             )
             response = json.loads(response_data.decode('utf-8'))
             
-            # Log complete response for debugging
-            logger.info(f"Complete response from Unreal: {response}")
+            logger.info(
+                "Received response for '%s': status=%s keys=%s",
+                command,
+                response.get("status"),
+                sorted(response.keys()),
+            )
             
             # Check for both error formats: {"status": "error", ...} and {"success": false, ...}
             if response.get("status") == "error":
@@ -238,26 +262,6 @@ def get_unreal_connection() -> Optional[UnrealConnection]:
     try:
         if _unreal_connection is None:
             _unreal_connection = UnrealConnection()
-            if not _unreal_connection.connect():
-                logger.warning("Could not connect to Unreal Engine")
-                _unreal_connection = None
-        else:
-            # Verify connection is still valid with a ping-like test
-            try:
-                # Simple test by sending an empty buffer to check if socket is still connected
-                _unreal_connection.socket.sendall(b'\x00')
-                logger.debug("Connection verified with ping test")
-            except Exception as e:
-                logger.warning(f"Existing connection failed: {e}")
-                _unreal_connection.disconnect()
-                _unreal_connection = None
-                # Try to reconnect
-                _unreal_connection = UnrealConnection()
-                if not _unreal_connection.connect():
-                    logger.warning("Could not reconnect to Unreal Engine")
-                    _unreal_connection = None
-                else:
-                    logger.info("Successfully reconnected to Unreal Engine")
         
         return _unreal_connection
     except Exception as e:
@@ -272,9 +276,9 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     try:
         _unreal_connection = get_unreal_connection()
         if _unreal_connection:
-            logger.info("Connected to Unreal Engine on startup")
+            logger.info("Initialized Unreal connection manager; commands reconnect per request")
         else:
-            logger.warning("Could not connect to Unreal Engine on startup")
+            logger.warning("Could not initialize Unreal connection manager")
     except Exception as e:
         logger.error(f"Error connecting to Unreal Engine on startup: {e}")
         _unreal_connection = None
@@ -331,10 +335,6 @@ def info():
       Set up dynamic property binding for text blocks
 
     ## Editor Tools
-    ### Viewport and Screenshots
-    - `focus_viewport(target, location, distance, orientation)` - Focus viewport
-    - `take_screenshot(filename, show_ui, resolution)` - Capture screenshots
-
     ### Actor Management
     - `get_actors_in_level()` - List all actors in current level
     - `find_actors_by_name(pattern)` - Find actors by name pattern

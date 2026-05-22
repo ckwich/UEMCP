@@ -19,6 +19,7 @@
 #include "Engine/Level.h"
 #include "Engine/Selection.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/App.h"
@@ -29,6 +30,7 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "ScopedTransaction.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
@@ -95,6 +97,174 @@ namespace
             return FString();
         }
         return World->GetOutermost() ? World->GetOutermost()->GetName() : World->GetMapName();
+    }
+
+    UWorld* ResolveEditorWorld(FString& OutError)
+    {
+        if (!GEditor)
+        {
+            OutError = TEXT("Editor is not available");
+            return nullptr;
+        }
+
+        UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+        if (EditorWorld && EditorWorld->WorldType == EWorldType::Editor)
+        {
+            return EditorWorld;
+        }
+
+        for (const FWorldContext& WorldContext : GEditor->GetWorldContexts())
+        {
+            UWorld* World = WorldContext.World();
+            if (World && WorldContext.WorldType == EWorldType::Editor)
+            {
+                return World;
+            }
+        }
+
+        OutError = TEXT("Failed to resolve editor world");
+        return nullptr;
+    }
+
+    UEditorActorSubsystem* GetEditorActorSubsystem()
+    {
+        return GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+    }
+
+    void GetActorsInEditorWorld(UWorld* World, TArray<AActor*>& OutActors)
+    {
+        OutActors.Reset();
+        if (!World)
+        {
+            return;
+        }
+
+        for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+        {
+            if (AActor* Actor = *ActorIt)
+            {
+                OutActors.Add(Actor);
+            }
+        }
+    }
+
+    AActor* FindActorByName(UWorld* World, const FString& ActorName)
+    {
+        if (!World || ActorName.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+        {
+            AActor* Actor = *ActorIt;
+            if (Actor && (Actor->GetName() == ActorName || Actor->GetActorLabel() == ActorName))
+            {
+                return Actor;
+            }
+        }
+
+        return nullptr;
+    }
+
+    void MarkActorLevelDirty(AActor* Actor)
+    {
+        if (!Actor)
+        {
+            return;
+        }
+
+        if (ULevel* Level = Actor->GetLevel())
+        {
+            Level->Modify();
+            if (UPackage* Package = Level->GetOutermost())
+            {
+                Package->SetDirtyFlag(true);
+            }
+        }
+    }
+
+    UClass* ResolveBasicActorClass(const FString& ActorType)
+    {
+        if (ActorType.Equals(TEXT("StaticMeshActor"), ESearchCase::IgnoreCase))
+        {
+            return AStaticMeshActor::StaticClass();
+        }
+        if (ActorType.Equals(TEXT("PointLight"), ESearchCase::IgnoreCase))
+        {
+            return APointLight::StaticClass();
+        }
+        if (ActorType.Equals(TEXT("SpotLight"), ESearchCase::IgnoreCase))
+        {
+            return ASpotLight::StaticClass();
+        }
+        if (ActorType.Equals(TEXT("DirectionalLight"), ESearchCase::IgnoreCase))
+        {
+            return ADirectionalLight::StaticClass();
+        }
+        if (ActorType.Equals(TEXT("CameraActor"), ESearchCase::IgnoreCase))
+        {
+            return ACameraActor::StaticClass();
+        }
+
+        return nullptr;
+    }
+
+    void ApplyEditorActorIdentityAndTransform(AActor* Actor, const FString& ActorName, const FVector& Scale)
+    {
+        if (!Actor)
+        {
+            return;
+        }
+
+        Actor->Modify();
+        if (!ActorName.IsEmpty())
+        {
+            Actor->SetActorLabel(ActorName);
+            if (Actor->GetName() != ActorName)
+            {
+                Actor->Rename(*ActorName);
+            }
+        }
+
+        FTransform Transform = Actor->GetTransform();
+        Transform.SetScale3D(Scale);
+        Actor->SetActorTransform(Transform);
+        Actor->PostEditMove(true);
+        Actor->PostEditChange();
+        MarkActorLevelDirty(Actor);
+    }
+
+    FActorPropertySerializationOptions ActorPropertyOptionsFromParams(const TSharedPtr<FJsonObject>& Params)
+    {
+        FActorPropertySerializationOptions Options;
+        if (!Params.IsValid())
+        {
+            return Options;
+        }
+
+        Params->TryGetBoolField(TEXT("include_private"), Options.bIncludePrivate);
+        Params->TryGetBoolField(TEXT("include_transient"), Options.bIncludeTransient);
+        Params->TryGetBoolField(TEXT("include_config"), Options.bIncludeConfig);
+        Params->TryGetBoolField(TEXT("include_non_editable"), Options.bIncludeNonEditable);
+        Params->TryGetBoolField(TEXT("include_object_paths"), Options.bIncludeObjectPaths);
+        Params->TryGetStringField(TEXT("name_contains"), Options.NameContains);
+
+        double NumericValue = 0.0;
+        if (Params->TryGetNumberField(TEXT("property_limit"), NumericValue))
+        {
+            Options.MaxProperties = FMath::Clamp(static_cast<int32>(NumericValue), 1, 512);
+        }
+        if (Params->TryGetNumberField(TEXT("max_struct_depth"), NumericValue))
+        {
+            Options.MaxNestedStructDepth = FMath::Clamp(static_cast<int32>(NumericValue), 0, 8);
+        }
+        if (Params->TryGetNumberField(TEXT("max_collection_items"), NumericValue))
+        {
+            Options.MaxCollectionItems = FMath::Clamp(static_cast<int32>(NumericValue), 0, 128);
+        }
+
+        return Options;
     }
 
     TSharedPtr<FJsonObject> ActorComponentToJson(UActorComponent* Component)
@@ -1867,8 +2037,15 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleRunAutomationTest(const 
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params)
 {
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
+    }
+
     TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    GetActorsInEditorWorld(World, AllActors);
     
     TArray<TSharedPtr<FJsonValue>> ActorArray;
     for (AActor* Actor : AllActors)
@@ -1893,8 +2070,15 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFindActorsByName(const T
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'pattern' parameter"));
     }
     
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
+    }
+
     TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    GetActorsInEditorWorld(World, AllActors);
     
     TArray<TSharedPtr<FJsonValue>> MatchingActors;
     for (AActor* Actor : AllActors)
@@ -1945,60 +2129,47 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnActor(const TShared
         Scale = FUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("scale"));
     }
 
-    // Create the actor based on type
-    AActor* NewActor = nullptr;
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
     if (!World)
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
 
     // Check if an actor with this name already exists
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    for (AActor* Actor : AllActors)
+    if (FindActorByName(World, ActorName))
     {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor with name '%s' already exists"), *ActorName));
-        }
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor with name '%s' already exists"), *ActorName));
     }
 
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *ActorName;
-
-    if (ActorType == TEXT("StaticMeshActor"))
-    {
-        NewActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("PointLight"))
-    {
-        NewActor = World->SpawnActor<APointLight>(APointLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("SpotLight"))
-    {
-        NewActor = World->SpawnActor<ASpotLight>(ASpotLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("DirectionalLight"))
-    {
-        NewActor = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("CameraActor"))
-    {
-        NewActor = World->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else
+    UClass* ActorClass = ResolveBasicActorClass(ActorType);
+    if (!ActorClass)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown actor type: %s"), *ActorType));
     }
 
+    FScopedTransaction Transaction(NSLOCTEXT("UnrealMCP", "SpawnActor", "Spawn Actor"));
+    World->Modify();
+    if (World->PersistentLevel)
+    {
+        World->PersistentLevel->Modify();
+    }
+
+    AActor* NewActor = nullptr;
+    if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+    {
+        NewActor = ActorSubsystem->SpawnActorFromClass(ActorClass, Location, Rotation);
+    }
+    else
+    {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Name = *ActorName;
+        NewActor = World->SpawnActor<AActor>(ActorClass, Location, Rotation, SpawnParams);
+    }
+
     if (NewActor)
     {
-        // Set scale (since SpawnActor only takes location and rotation)
-        FTransform Transform = NewActor->GetTransform();
-        Transform.SetScale3D(Scale);
-        NewActor->SetActorTransform(Transform);
+        ApplyEditorActorIdentityAndTransform(NewActor, ActorName, Scale);
 
         // Return the created actor's details
         return FUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
@@ -2015,25 +2186,37 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleDeleteActor(const TShare
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'name' parameter"));
     }
 
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
     {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            // Store actor info before deletion for the response
-            TSharedPtr<FJsonObject> ActorInfo = FUnrealMCPCommonUtils::ActorToJsonObject(Actor);
-            
-            // Delete the actor
-            Actor->Destroy();
-            
-            TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-            ResultObj->SetObjectField(TEXT("deleted_actor"), ActorInfo);
-            return ResultObj;
-        }
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
-    
+
+    AActor* Actor = FindActorByName(World, ActorName);
+    if (Actor)
+    {
+        TSharedPtr<FJsonObject> ActorInfo = FUnrealMCPCommonUtils::ActorToJsonObject(Actor);
+
+        FScopedTransaction Transaction(NSLOCTEXT("UnrealMCP", "DeleteActor", "Delete Actor"));
+        Actor->Modify();
+        MarkActorLevelDirty(Actor);
+
+        UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem();
+        const bool bDeleted = ActorSubsystem
+            ? ActorSubsystem->DestroyActor(Actor)
+            : World->EditorDestroyActor(Actor, true);
+
+        if (!bDeleted)
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to delete actor: %s"), *ActorName));
+        }
+
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetObjectField(TEXT("deleted_actor"), ActorInfo);
+        return ResultObj;
+    }
+
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
 }
 
@@ -2046,20 +2229,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorTransform(const 
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'name' parameter"));
     }
 
-    // Find the actor
-    AActor* TargetActor = nullptr;
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
     {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            TargetActor = Actor;
-            break;
-        }
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
 
+    AActor* TargetActor = FindActorByName(World, ActorName);
     if (!TargetActor)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
@@ -2081,8 +2258,13 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorTransform(const 
         NewTransform.SetScale3D(FUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("scale")));
     }
 
-    // Set the new transform
+    FScopedTransaction Transaction(NSLOCTEXT("UnrealMCP", "SetActorTransform", "Set Actor Transform"));
+    TargetActor->Modify();
+
     TargetActor->SetActorTransform(NewTransform);
+    TargetActor->PostEditMove(true);
+    TargetActor->PostEditChange();
+    MarkActorLevelDirty(TargetActor);
 
     // Return updated actor info
     return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
@@ -2097,27 +2279,20 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleGetActorProperties(const
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'name' parameter"));
     }
 
-    // Find the actor
-    AActor* TargetActor = nullptr;
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
     {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            TargetActor = Actor;
-            break;
-        }
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
 
+    AActor* TargetActor = FindActorByName(World, ActorName);
     if (!TargetActor)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
     }
 
-    // Always return detailed properties for this command
-    return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
+    return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true, ActorPropertyOptionsFromParams(Params));
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorProperty(const TSharedPtr<FJsonObject>& Params)
@@ -2129,20 +2304,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorProperty(const T
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'name' parameter"));
     }
 
-    // Find the actor
-    AActor* TargetActor = nullptr;
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
+    if (!World)
     {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            TargetActor = Actor;
-            break;
-        }
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
 
+    AActor* TargetActor = FindActorByName(World, ActorName);
     if (!TargetActor)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
@@ -2165,8 +2334,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorProperty(const T
     
     // Set the property using our utility function
     FString ErrorMessage;
+    FScopedTransaction Transaction(NSLOCTEXT("UnrealMCP", "SetActorProperty", "Set Actor Property"));
+    TargetActor->Modify();
+
     if (FUnrealMCPCommonUtils::SetObjectProperty(TargetActor, PropertyName, PropertyValue, ErrorMessage))
     {
+        TargetActor->PostEditChange();
+        MarkActorLevelDirty(TargetActor);
+
         // Property set successfully
         TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
         ResultObj->SetStringField(TEXT("actor"), ActorName);
@@ -2235,6 +2410,12 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *ObjectPath));
     }
 
+    UClass* GeneratedActorClass = Blueprint->GeneratedClass;
+    if (!GeneratedActorClass || !GeneratedActorClass->IsChildOf(AActor::StaticClass()))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint does not generate an actor class: %s"), *ObjectPath));
+    }
+
     // Get transform parameters
     FVector Location(0.0f, 0.0f, 0.0f);
     FRotator Rotation(0.0f, 0.0f, 0.0f);
@@ -2253,24 +2434,45 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
         Scale = FUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("scale"));
     }
 
-    // Spawn the actor
-    UWorld* World = GEditor->GetEditorWorldContext().World();
+    FString WorldError;
+    UWorld* World = ResolveEditorWorld(WorldError);
     if (!World)
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+        return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
     }
 
-    FTransform SpawnTransform;
-    SpawnTransform.SetLocation(Location);
-    SpawnTransform.SetRotation(FQuat(Rotation));
-    SpawnTransform.SetScale3D(Scale);
+    if (FindActorByName(World, ActorName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor with name '%s' already exists"), *ActorName));
+    }
 
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *ActorName;
+    FScopedTransaction Transaction(NSLOCTEXT("UnrealMCP", "SpawnBlueprintActor", "Spawn Blueprint Actor"));
+    World->Modify();
+    if (World->PersistentLevel)
+    {
+        World->PersistentLevel->Modify();
+    }
 
-    AActor* NewActor = World->SpawnActor<AActor>(Blueprint->GeneratedClass, SpawnTransform, SpawnParams);
+    AActor* NewActor = nullptr;
+    if (UEditorActorSubsystem* ActorSubsystem = GetEditorActorSubsystem())
+    {
+        NewActor = ActorSubsystem->SpawnActorFromClass(TSubclassOf<AActor>(GeneratedActorClass), Location, Rotation);
+    }
+    else
+    {
+        FTransform SpawnTransform;
+        SpawnTransform.SetLocation(Location);
+        SpawnTransform.SetRotation(FQuat(Rotation));
+        SpawnTransform.SetScale3D(Scale);
+
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Name = *ActorName;
+        NewActor = World->SpawnActor<AActor>(GeneratedActorClass, SpawnTransform, SpawnParams);
+    }
+
     if (NewActor)
     {
+        ApplyEditorActorIdentityAndTransform(NewActor, ActorName, Scale);
         return FUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
     }
 
@@ -2371,8 +2573,19 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFocusViewport(const TSha
         HasOrientation = true;
     }
 
+    if (!GEditor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor is not available"));
+    }
+
+    FViewport* ActiveViewport = GEditor->GetActiveViewport();
+    if (!ActiveViewport || !ActiveViewport->GetClient())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get active viewport"));
+    }
+
     // Get the active viewport
-    FLevelEditorViewportClient* ViewportClient = (FLevelEditorViewportClient*)GEditor->GetActiveViewport()->GetClient();
+    FLevelEditorViewportClient* ViewportClient = static_cast<FLevelEditorViewportClient*>(ActiveViewport->GetClient());
     if (!ViewportClient)
     {
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get active viewport"));
@@ -2381,20 +2594,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFocusViewport(const TSha
     // If we have a target actor, focus on it
     if (HasTargetActor)
     {
-        // Find the actor
-        AActor* TargetActor = nullptr;
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
-        
-        for (AActor* Actor : AllActors)
+        FString WorldError;
+        UWorld* World = ResolveEditorWorld(WorldError);
+        if (!World)
         {
-            if (Actor && Actor->GetName() == TargetActorName)
-            {
-                TargetActor = Actor;
-                break;
-            }
+            return FUnrealMCPCommonUtils::CreateErrorResponse(WorldError);
         }
 
+        AActor* TargetActor = FindActorByName(World, TargetActorName);
         if (!TargetActor)
         {
             return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *TargetActorName));
@@ -2451,8 +2658,13 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleTakeScreenshot(const TSh
         
         if (Viewport->ReadPixels(Bitmap, FReadSurfaceDataFlags(), ViewportRect))
         {
-            TArray<uint8> CompressedBitmap;
-            FImageUtils::CompressImageArray(Viewport->GetSizeXY().X, Viewport->GetSizeXY().Y, Bitmap, CompressedBitmap);
+            TArray64<uint8> CompressedBitmap;
+            FImageUtils::PNGCompressImageArray(
+                Viewport->GetSizeXY().X,
+                Viewport->GetSizeXY().Y,
+                TArrayView64<const FColor>(Bitmap.GetData(), Bitmap.Num()),
+                CompressedBitmap
+            );
             
             if (FFileHelper::SaveArrayToFile(CompressedBitmap, *FilePath))
             {

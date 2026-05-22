@@ -4,7 +4,7 @@ This document provides detailed information about the editor tools available in 
 
 ## Overview
 
-Editor tools allow you to control the Unreal Editor viewport and other editor functionality through MCP commands. These tools are particularly useful for automating tasks like focusing the camera on specific actors or locations.
+Editor tools provide explicit editor-level commands through the Unreal bridge. MCP-registered tools are listed in the Python tool surface; bridge-only commands remain internal until they have a validated public contract.
 
 ## Editor Tools
 
@@ -28,54 +28,9 @@ Save the current editor level through Unreal's editor save API.
 }
 ```
 
-### focus_viewport
+### Bridge-only viewport commands
 
-Focus the viewport on a specific actor or location.
-
-**Parameters:**
-- `target` (string, optional) - Name of the actor to focus on (if provided, location is ignored)
-- `location` (array, optional) - [X, Y, Z] coordinates to focus on (used if target is None)
-- `distance` (float, optional) - Distance from the target/location (default: 1000.0)
-- `orientation` (array, optional) - [Pitch, Yaw, Roll] for the viewport camera
-
-**Returns:**
-- Response from Unreal Engine containing the result of the focus operation
-
-**Example:**
-```json
-{
-  "command": "focus_viewport",
-  "params": {
-    "target": "PlayerStart",
-    "distance": 500,
-    "orientation": [0, 180, 0]
-  }
-}
-```
-
-### take_screenshot
-
-Capture a screenshot of the viewport.
-
-**Parameters:**
-- `filename` (string, optional) - Name of the file to save the screenshot as (default: "screenshot.png")
-- `show_ui` (boolean, optional) - Whether to include UI elements in the screenshot (default: false)
-- `resolution` (array, optional) - [Width, Height] for the screenshot
-
-**Returns:**
-- Result of the screenshot operation
-
-**Example:**
-```json
-{
-  "command": "take_screenshot",
-  "params": {
-    "filename": "my_scene.png",
-    "show_ui": false,
-    "resolution": [1920, 1080]
-  }
-}
-```
+`focus_viewport` and `take_screenshot` remain lower-level bridge commands and are not currently registered as Python MCP tools. Use the tool-surface audit manifest as the source of truth before exposing either command to agents.
 
 ## Error Handling
 
@@ -97,18 +52,6 @@ from unreal_mcp_server import get_unreal_connection
 
 # Get connection to Unreal Engine
 unreal = get_unreal_connection()
-
-# Focus on a specific actor
-focus_response = unreal.send_command("focus_viewport", {
-    "target": "PlayerStart",
-    "distance": 500,
-    "orientation": [0, 180, 0]
-})
-print(focus_response)
-
-# Take a screenshot
-screenshot_response = unreal.send_command("take_screenshot", {"filename": "my_scene.png"})
-print(screenshot_response)
 
 # Save current level after explicit editor-backed mutations
 save_response = unreal.send_command("save_current_level", {"only_if_dirty": true})

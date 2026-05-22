@@ -121,20 +121,34 @@ Set the transform (location, rotation, scale) of an actor.
 
 ### get_actor_properties
 
-Get all properties of an actor.
+Get read-only reflected properties of an actor.
 
 **Parameters:**
 - `name` (string) - The name of the actor
+- `include_private` (boolean, optional) - Include private/protected reflected fields, defaults to false
+- `include_transient` (boolean, optional) - Include transient reflected fields, defaults to false
+- `include_config` (boolean, optional) - Include config reflected fields, defaults to false
+- `include_non_editable` (boolean, optional) - Include fields that are not editable or Blueprint-visible, defaults to false
+- `include_object_paths` (boolean, optional) - Include full object paths for object references, defaults to false
+- `property_limit` (integer, optional) - Maximum top-level reflected properties to return, defaults to 64
+- `max_struct_depth` (integer, optional) - Maximum nested struct depth, defaults to 3
+- `max_collection_items` (integer, optional) - Maximum array entries returned per property, defaults to 16
+- `name_contains` (string, optional) - Filter reflected property names by substring
 
 **Returns:**
-- Object containing all actor properties
+- Object containing actor identity, transform, and a `properties` object
+- Each reflected property includes type information, access/replication/editing flags, a typed `value` when supported, and `value_text` from Unreal's property exporter
+- Struct properties include `struct_type` and nested reflected `fields`
+- `properties_meta` reports matching count, returned count, limits, filters, and truncation state
+- Private, transient, config, object-path, and non-editable state is excluded by default and must be explicitly requested
 
 **Example:**
 ```json
 {
   "command": "get_actor_properties",
   "params": {
-    "name": "MyCube"
+    "name": "MyCube",
+    "property_limit": 32
   }
 }
 ```

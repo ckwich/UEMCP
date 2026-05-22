@@ -17,6 +17,19 @@ class UK2Node_InputAction;
 class UK2Node_Self;
 class UFunction;
 
+struct UNREALMCP_API FActorPropertySerializationOptions
+{
+    bool bIncludePrivate = false;
+    bool bIncludeTransient = false;
+    bool bIncludeConfig = false;
+    bool bIncludeNonEditable = false;
+    bool bIncludeObjectPaths = false;
+    int32 MaxProperties = 64;
+    int32 MaxNestedStructDepth = 3;
+    int32 MaxCollectionItems = 16;
+    FString NameContains;
+};
+
 /**
  * Common utilities for UnrealMCP commands
  */
@@ -34,7 +47,11 @@ public:
     
     // Actor utilities
     static TSharedPtr<FJsonValue> ActorToJson(AActor* Actor);
-    static TSharedPtr<FJsonObject> ActorToJsonObject(AActor* Actor, bool bDetailed = false);
+    static TSharedPtr<FJsonObject> ActorToJsonObject(
+        AActor* Actor,
+        bool bDetailed = false,
+        const FActorPropertySerializationOptions& PropertyOptions = FActorPropertySerializationOptions()
+    );
     
     // Blueprint utilities
     static UBlueprint* FindBlueprint(const FString& BlueprintName);
@@ -56,4 +73,4 @@ public:
     // Property utilities
     static bool SetObjectProperty(UObject* Object, const FString& PropertyName, 
                                  const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage);
-}; 
+};

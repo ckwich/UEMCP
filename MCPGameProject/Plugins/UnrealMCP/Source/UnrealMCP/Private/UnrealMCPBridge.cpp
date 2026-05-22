@@ -204,23 +204,19 @@ void UUnrealMCPBridge::StopServer()
 FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
     UE_LOG(LogTemp, Display, TEXT("UnrealMCPBridge: Executing command: %s"), *CommandType);
-    
-    // Create a promise to wait for the result
-    TPromise<FString> Promise;
-    TFuture<FString> Future = Promise.GetFuture();
-    
-    // Queue execution on Game Thread
-    AsyncTask(ENamedThreads::GameThread, [this, CommandType, Params, Promise = MoveTemp(Promise)]() mutable
+
+    auto ExecuteOnGameThread = [this, CommandType, Params]() -> FString
     {
-        TSharedPtr<FJsonObject> ResponseJson = MakeShareable(new FJsonObject);
-        
+        TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
+        TSharedPtr<FJsonObject> SafeParams = Params.IsValid() ? Params : MakeShared<FJsonObject>();
+
         try
         {
             TSharedPtr<FJsonObject> ResultJson;
-            
+
             if (CommandType == TEXT("ping"))
             {
-                ResultJson = MakeShareable(new FJsonObject);
+                ResultJson = MakeShared<FJsonObject>();
                 ResultJson->SetStringField(TEXT("message"), TEXT("pong"));
             }
             // Editor Commands (including actor manipulation)
@@ -247,7 +243,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("focus_viewport") || 
                      CommandType == TEXT("take_screenshot"))
             {
-                ResultJson = EditorCommands->HandleCommand(CommandType, Params);
+                ResultJson = EditorCommands->HandleCommand(CommandType, SafeParams);
             }
             // Blueprint Commands
             else if (CommandType == TEXT("create_blueprint") || 
@@ -259,7 +255,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_static_mesh_properties") ||
                      CommandType == TEXT("set_pawn_properties"))
             {
-                ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
+                ResultJson = BlueprintCommands->HandleCommand(CommandType, SafeParams);
             }
             // Blueprint Node Commands
             else if (CommandType == TEXT("connect_blueprint_nodes") || 
@@ -272,12 +268,12 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("add_blueprint_get_component_node") ||
                      CommandType == TEXT("add_blueprint_variable"))
             {
-                ResultJson = BlueprintNodeCommands->HandleCommand(CommandType, Params);
+                ResultJson = BlueprintNodeCommands->HandleCommand(CommandType, SafeParams);
             }
             // Project Commands
             else if (CommandType == TEXT("create_input_mapping"))
             {
-                ResultJson = ProjectCommands->HandleCommand(CommandType, Params);
+                ResultJson = ProjectCommands->HandleCommand(CommandType, SafeParams);
             }
             // UMG Commands
             else if (CommandType == TEXT("create_umg_widget_blueprint") ||
@@ -287,24 +283,34 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_text_block_binding") ||
                      CommandType == TEXT("add_widget_to_viewport"))
             {
-                ResultJson = UMGCommands->HandleCommand(CommandType, Params);
+                ResultJson = UMGCommands->HandleCommand(CommandType, SafeParams);
             }
             else
             {
                 ResponseJson->SetStringField(TEXT("status"), TEXT("error"));
                 ResponseJson->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown command: %s"), *CommandType));
-                
+
                 FString ResultString;
                 TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultString);
                 FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
-                Promise.SetValue(ResultString);
-                return;
+                return ResultString;
             }
-            
+
+            if (!ResultJson.IsValid())
+            {
+                ResponseJson->SetStringField(TEXT("status"), TEXT("error"));
+                ResponseJson->SetStringField(TEXT("error"), FString::Printf(TEXT("Command returned no result: %s"), *CommandType));
+
+                FString ResultString;
+                TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultString);
+                FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
+                return ResultString;
+            }
+
             // Check if the result contains an error
             bool bSuccess = true;
             FString ErrorMessage;
-            
+
             if (ResultJson->HasField(TEXT("success")))
             {
                 bSuccess = ResultJson->GetBoolField(TEXT("success"));
@@ -332,12 +338,25 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             ResponseJson->SetStringField(TEXT("status"), TEXT("error"));
             ResponseJson->SetStringField(TEXT("error"), UTF8_TO_TCHAR(e.what()));
         }
-        
+
         FString ResultString;
         TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultString);
         FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
-        Promise.SetValue(ResultString);
+        return ResultString;
+    };
+
+    if (IsInGameThread())
+    {
+        return ExecuteOnGameThread();
+    }
+
+    TPromise<FString> Promise;
+    TFuture<FString> Future = Promise.GetFuture();
+
+    AsyncTask(ENamedThreads::GameThread, [ExecuteOnGameThread = MoveTemp(ExecuteOnGameThread), Promise = MoveTemp(Promise)]() mutable
+    {
+        Promise.SetValue(ExecuteOnGameThread());
     });
-    
+
     return Future.Get();
 }

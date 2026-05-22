@@ -25,6 +25,350 @@
 #include "BlueprintActionDatabase.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "UObject/UnrealType.h"
+
+namespace
+{
+    constexpr int32 MaxActorPropertyEntries = 64;
+
+    TSharedPtr<FJsonValue> PropertyValueToJson(
+        FProperty* Property,
+        const void* ValuePtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    );
+    TSharedPtr<FJsonObject> ReflectedPropertyToJson(
+        FProperty* Property,
+        const void* ContainerPtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    );
+
+    FString ExportPropertyValue(FProperty* Property, const void* ValuePtr, UObject* Owner)
+    {
+        FString ExportedValue;
+        if (Property && ValuePtr)
+        {
+            Property->ExportTextItem_Direct(ExportedValue, ValuePtr, nullptr, Owner, PPF_None);
+        }
+        return ExportedValue;
+    }
+
+    bool IsPrivateOrProtectedProperty(FProperty* Property)
+    {
+        return Property && Property->HasAnyPropertyFlags(
+            CPF_NativeAccessSpecifierPrivate | CPF_NativeAccessSpecifierProtected
+        );
+    }
+
+    bool ShouldIncludeReflectedProperty(
+        FProperty* Property,
+        const FActorPropertySerializationOptions& Options,
+        bool bNestedStructField
+    )
+    {
+        if (!Property)
+        {
+            return false;
+        }
+
+        if (!bNestedStructField && !Options.NameContains.IsEmpty() && !Property->GetName().Contains(Options.NameContains))
+        {
+            return false;
+        }
+
+        if (!Options.bIncludePrivate && IsPrivateOrProtectedProperty(Property))
+        {
+            return false;
+        }
+
+        if (!Options.bIncludeTransient && Property->HasAnyPropertyFlags(CPF_Transient))
+        {
+            return false;
+        }
+
+        if (!Options.bIncludeConfig && Property->HasAnyPropertyFlags(CPF_Config))
+        {
+            return false;
+        }
+
+        const bool bEditableOrBlueprintVisible = Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible);
+        if (!Options.bIncludeNonEditable && !bNestedStructField && !bEditableOrBlueprintVisible)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    TSharedPtr<FJsonObject> PropertyFlagsToJson(FProperty* Property)
+    {
+        TSharedPtr<FJsonObject> FlagsObject = MakeShared<FJsonObject>();
+        if (!Property)
+        {
+            return FlagsObject;
+        }
+
+        FlagsObject->SetBoolField(TEXT("editable"), Property->HasAnyPropertyFlags(CPF_Edit));
+        FlagsObject->SetBoolField(TEXT("blueprint_visible"), Property->HasAnyPropertyFlags(CPF_BlueprintVisible));
+        FlagsObject->SetBoolField(TEXT("blueprint_read_only"), Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly));
+        FlagsObject->SetBoolField(TEXT("transient"), Property->HasAnyPropertyFlags(CPF_Transient));
+        FlagsObject->SetBoolField(TEXT("config"), Property->HasAnyPropertyFlags(CPF_Config));
+        FlagsObject->SetBoolField(TEXT("save_game"), Property->HasAnyPropertyFlags(CPF_SaveGame));
+        FlagsObject->SetBoolField(TEXT("replicated"), Property->HasAnyPropertyFlags(CPF_Net));
+        FlagsObject->SetBoolField(TEXT("private"), Property->HasAnyPropertyFlags(CPF_NativeAccessSpecifierPrivate));
+        FlagsObject->SetBoolField(TEXT("protected"), Property->HasAnyPropertyFlags(CPF_NativeAccessSpecifierProtected));
+        FlagsObject->SetBoolField(TEXT("public"), Property->HasAnyPropertyFlags(CPF_NativeAccessSpecifierPublic));
+        FlagsObject->SetStringField(
+            TEXT("flags_hex"),
+            FString::Printf(TEXT("0x%016llx"), static_cast<unsigned long long>(Property->GetPropertyFlags()))
+        );
+
+        return FlagsObject;
+    }
+
+    TSharedPtr<FJsonObject> StructFieldsToJson(
+        FStructProperty* StructProperty,
+        const void* StructValuePtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    )
+    {
+        TSharedPtr<FJsonObject> FieldsObject = MakeShared<FJsonObject>();
+        if (!StructProperty || !StructProperty->Struct || !StructValuePtr)
+        {
+            return FieldsObject;
+        }
+
+        if (Depth >= Options.MaxNestedStructDepth)
+        {
+            FieldsObject->SetBoolField(TEXT("_truncated"), true);
+            FieldsObject->SetStringField(TEXT("_reason"), TEXT("max_struct_depth"));
+            return FieldsObject;
+        }
+
+        for (TFieldIterator<FProperty> FieldIt(StructProperty->Struct, EFieldIteratorFlags::IncludeSuper); FieldIt; ++FieldIt)
+        {
+            FProperty* Field = *FieldIt;
+            if (!ShouldIncludeReflectedProperty(Field, Options, true))
+            {
+                continue;
+            }
+
+            FieldsObject->SetObjectField(Field->GetName(), ReflectedPropertyToJson(Field, StructValuePtr, Owner, Options, Depth + 1));
+        }
+
+        return FieldsObject;
+    }
+
+    TSharedPtr<FJsonValue> ArrayValueToJson(
+        FArrayProperty* ArrayProperty,
+        const void* ValuePtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    )
+    {
+        if (!ArrayProperty || !ValuePtr)
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+        TArray<TSharedPtr<FJsonValue>> JsonValues;
+        const int32 ItemCount = FMath::Min(ArrayHelper.Num(), Options.MaxCollectionItems);
+        for (int32 Index = 0; Index < ItemCount; ++Index)
+        {
+            JsonValues.Add(PropertyValueToJson(ArrayProperty->Inner, ArrayHelper.GetRawPtr(Index), Owner, Options, Depth + 1));
+        }
+
+        return MakeShared<FJsonValueArray>(JsonValues);
+    }
+
+    TSharedPtr<FJsonValue> PropertyValueToJson(
+        FProperty* Property,
+        const void* ValuePtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    )
+    {
+        if (!Property || !ValuePtr)
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+        {
+            return MakeShared<FJsonValueBoolean>(BoolProperty->GetPropertyValue(ValuePtr));
+        }
+
+        if (FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+        {
+            const int64 RawValue = EnumProperty->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr);
+            UEnum* Enum = EnumProperty->GetEnum();
+            return MakeShared<FJsonValueString>(Enum ? Enum->GetNameStringByValue(RawValue) : FString::FromInt(RawValue));
+        }
+
+        if (FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+        {
+            const uint8 RawValue = ByteProperty->GetPropertyValue(ValuePtr);
+            UEnum* Enum = ByteProperty->GetIntPropertyEnum();
+            return MakeShared<FJsonValueString>(Enum ? Enum->GetNameStringByValue(RawValue) : FString::FromInt(RawValue));
+        }
+
+        if (FNumericProperty* NumericProperty = CastField<FNumericProperty>(Property))
+        {
+            if (NumericProperty->IsFloatingPoint())
+            {
+                return MakeShared<FJsonValueNumber>(NumericProperty->GetFloatingPointPropertyValue(ValuePtr));
+            }
+
+            if (NumericProperty->IsInteger())
+            {
+                return MakeShared<FJsonValueNumber>(static_cast<double>(NumericProperty->GetSignedIntPropertyValue(ValuePtr)));
+            }
+        }
+
+        if (FStrProperty* StringProperty = CastField<FStrProperty>(Property))
+        {
+            return MakeShared<FJsonValueString>(StringProperty->GetPropertyValue(ValuePtr));
+        }
+
+        if (FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+        {
+            return MakeShared<FJsonValueString>(NameProperty->GetPropertyValue(ValuePtr).ToString());
+        }
+
+        if (FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+        {
+            return MakeShared<FJsonValueString>(TextProperty->GetPropertyValue(ValuePtr).ToString());
+        }
+
+        if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+        {
+            UObject* ObjectValue = ObjectProperty->GetObjectPropertyValue(ValuePtr);
+            if (ObjectValue)
+            {
+                TSharedPtr<FJsonObject> ObjectRef = MakeShared<FJsonObject>();
+                ObjectRef->SetStringField(TEXT("name"), ObjectValue->GetName());
+                ObjectRef->SetStringField(TEXT("class"), ObjectValue->GetClass() ? ObjectValue->GetClass()->GetName() : FString());
+                if (Options.bIncludeObjectPaths)
+                {
+                    ObjectRef->SetStringField(TEXT("path"), ObjectValue->GetPathName());
+                }
+                return MakeShared<FJsonValueObject>(ObjectRef);
+            }
+            return MakeShared<FJsonValueNull>();
+        }
+
+        if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+        {
+            return ArrayValueToJson(ArrayProperty, ValuePtr, Owner, Options, Depth);
+        }
+
+        return MakeShared<FJsonValueString>(ExportPropertyValue(Property, ValuePtr, Owner));
+    }
+
+    TSharedPtr<FJsonObject> ReflectedPropertyToJson(
+        FProperty* Property,
+        const void* ContainerPtr,
+        UObject* Owner,
+        const FActorPropertySerializationOptions& Options,
+        int32 Depth
+    )
+    {
+        TSharedPtr<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
+        if (!Property || !ContainerPtr)
+        {
+            return PropertyObject;
+        }
+
+        const void* ValuePtr = Property->ContainerPtrToValuePtr<const void>(ContainerPtr);
+
+        PropertyObject->SetStringField(TEXT("type"), Property->GetCPPType());
+        PropertyObject->SetStringField(TEXT("property_class"), Property->GetClass()->GetName());
+        PropertyObject->SetObjectField(TEXT("flags"), PropertyFlagsToJson(Property));
+        PropertyObject->SetField(TEXT("value"), PropertyValueToJson(Property, ValuePtr, Owner, Options, Depth));
+        PropertyObject->SetStringField(TEXT("value_text"), ExportPropertyValue(Property, ValuePtr, Owner));
+
+        if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+        {
+            PropertyObject->SetStringField(
+                TEXT("struct_type"),
+                StructProperty->Struct ? StructProperty->Struct->GetName() : TEXT("")
+            );
+            PropertyObject->SetObjectField(TEXT("fields"), StructFieldsToJson(StructProperty, ValuePtr, Owner, Options, Depth));
+        }
+        else if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+        {
+            FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+            PropertyObject->SetNumberField(TEXT("count"), ArrayHelper.Num());
+            PropertyObject->SetBoolField(TEXT("truncated"), ArrayHelper.Num() > Options.MaxCollectionItems);
+        }
+
+        return PropertyObject;
+    }
+
+    TSharedPtr<FJsonObject> ObjectPropertiesToJson(
+        UObject* Object,
+        const FActorPropertySerializationOptions& Options,
+        TSharedPtr<FJsonObject>& OutMeta
+    )
+    {
+        TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+        OutMeta = MakeShared<FJsonObject>();
+        if (!Object)
+        {
+            OutMeta->SetNumberField(TEXT("total_matching_properties"), 0);
+            OutMeta->SetNumberField(TEXT("returned_properties"), 0);
+            OutMeta->SetBoolField(TEXT("truncated"), false);
+            return PropertiesObject;
+        }
+
+        int32 MatchingPropertyCount = 0;
+        int32 ReturnedPropertyCount = 0;
+        const int32 RequestedMaxProperties = Options.MaxProperties > 0 ? Options.MaxProperties : MaxActorPropertyEntries;
+        const int32 MaxReturnedProperties = FMath::Clamp(RequestedMaxProperties, 1, 512);
+
+        for (TFieldIterator<FProperty> PropertyIt(Object->GetClass(), EFieldIteratorFlags::IncludeSuper); PropertyIt; ++PropertyIt)
+        {
+            FProperty* Property = *PropertyIt;
+            if (!ShouldIncludeReflectedProperty(Property, Options, false))
+            {
+                continue;
+            }
+
+            ++MatchingPropertyCount;
+            if (ReturnedPropertyCount >= MaxReturnedProperties)
+            {
+                continue;
+            }
+
+            PropertiesObject->SetObjectField(Property->GetName(), ReflectedPropertyToJson(Property, Object, Object, Options, 0));
+            ++ReturnedPropertyCount;
+        }
+
+        OutMeta->SetNumberField(TEXT("total_matching_properties"), MatchingPropertyCount);
+        OutMeta->SetNumberField(TEXT("returned_properties"), ReturnedPropertyCount);
+        OutMeta->SetBoolField(TEXT("truncated"), MatchingPropertyCount > ReturnedPropertyCount);
+        OutMeta->SetNumberField(TEXT("property_limit"), MaxReturnedProperties);
+        OutMeta->SetBoolField(TEXT("include_private"), Options.bIncludePrivate);
+        OutMeta->SetBoolField(TEXT("include_transient"), Options.bIncludeTransient);
+        OutMeta->SetBoolField(TEXT("include_config"), Options.bIncludeConfig);
+        OutMeta->SetBoolField(TEXT("include_non_editable"), Options.bIncludeNonEditable);
+        OutMeta->SetBoolField(TEXT("include_object_paths"), Options.bIncludeObjectPaths);
+        if (!Options.NameContains.IsEmpty())
+        {
+            OutMeta->SetStringField(TEXT("name_contains"), Options.NameContains);
+        }
+
+        return PropertiesObject;
+    }
+}
 
 // JSON Utilities
 TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::CreateErrorResponse(const FString& Message)
@@ -453,7 +797,11 @@ TSharedPtr<FJsonValue> FUnrealMCPCommonUtils::ActorToJson(AActor* Actor)
     return MakeShared<FJsonValueObject>(ActorObject);
 }
 
-TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ActorToJsonObject(AActor* Actor, bool bDetailed)
+TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ActorToJsonObject(
+    AActor* Actor,
+    bool bDetailed,
+    const FActorPropertySerializationOptions& PropertyOptions
+)
 {
     if (!Actor)
     {
@@ -484,6 +832,13 @@ TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ActorToJsonObject(AActor* Actor, 
     ScaleArray.Add(MakeShared<FJsonValueNumber>(Scale.Y));
     ScaleArray.Add(MakeShared<FJsonValueNumber>(Scale.Z));
     ActorObject->SetArrayField(TEXT("scale"), ScaleArray);
+
+    if (bDetailed)
+    {
+        TSharedPtr<FJsonObject> PropertiesMeta;
+        ActorObject->SetObjectField(TEXT("properties"), ObjectPropertiesToJson(Actor, PropertyOptions, PropertiesMeta));
+        ActorObject->SetObjectField(TEXT("properties_meta"), PropertiesMeta);
+    }
     
     return ActorObject;
 }
@@ -706,4 +1061,4 @@ bool FUnrealMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Pr
     OutErrorMessage = FString::Printf(TEXT("Unsupported property type: %s for property %s"), 
                                     *Property->GetClass()->GetName(), *PropertyName);
     return false;
-} 
+}

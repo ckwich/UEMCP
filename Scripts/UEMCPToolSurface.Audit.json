@@ -264,7 +264,7 @@
       "exposure": "mcp_registered",
       "bridge_command": true,
       "requires_explicit_user_intent": false,
-      "recommended_use": "Read one actor's properties; prefer bounded snapshot first for discovery."
+      "recommended_use": "Read one actor's bounded reflected properties; request private/transient/object-path expansion only when explicitly needed."
     },
     "spawn_actor": {
       "category": "level_mutation",

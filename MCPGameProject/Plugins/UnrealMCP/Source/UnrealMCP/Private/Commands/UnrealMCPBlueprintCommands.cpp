@@ -637,8 +637,9 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetComponentProperty(
                         if (EnumValue != INDEX_NONE)
                         {
                             UE_LOG(LogTemp, Log, TEXT("SetComponentProperty - Found enum value: %lld"), EnumValue);
+                            void* EnumPropertyAddr = EnumProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
                             EnumProp->GetUnderlyingProperty()->SetIntPropertyValue(
-                                ComponentTemplate, 
+                                EnumPropertyAddr,
                                 EnumValue
                             );
                             bSuccess = true;
@@ -671,8 +672,9 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetComponentProperty(
                     // Allow setting enum by integer value
                     int64 EnumValue = JsonValue->AsNumber();
                     UE_LOG(LogTemp, Log, TEXT("SetComponentProperty - Setting enum from number: %lld"), EnumValue);
+                    void* EnumPropertyAddr = EnumProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
                     EnumProp->GetUnderlyingProperty()->SetIntPropertyValue(
-                        ComponentTemplate, 
+                        EnumPropertyAddr,
                         EnumValue
                     );
                     bSuccess = true;
@@ -696,13 +698,15 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetComponentProperty(
                     
                     if (NumericProp->IsInteger())
                     {
-                        NumericProp->SetIntPropertyValue(ComponentTemplate, (int64)Value);
+                        void* NumericPropertyAddr = NumericProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
+                        NumericProp->SetIntPropertyValue(NumericPropertyAddr, (int64)Value);
                         UE_LOG(LogTemp, Log, TEXT("SetComponentProperty - Set integer value: %lld"), (int64)Value);
                         bSuccess = true;
                     }
                     else if (NumericProp->IsFloatingPoint())
                     {
-                        NumericProp->SetFloatingPointPropertyValue(ComponentTemplate, Value);
+                        void* NumericPropertyAddr = NumericProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
+                        NumericProp->SetFloatingPointPropertyValue(NumericPropertyAddr, Value);
                         UE_LOG(LogTemp, Log, TEXT("SetComponentProperty - Set float value: %f"), Value);
                         bSuccess = true;
                     }
