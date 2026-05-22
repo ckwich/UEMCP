@@ -13,6 +13,8 @@ from Fab login, web UI, network, marketplace, and license state.
 
 - Headless smoke keeps using `Scripts/Smoke-UEMCPObservability.ps1`.
 - Interactive asset work uses `Scripts/Start-UEMCPInteractiveAssetWorkflow.ps1`.
+- End-to-end asset smoke uses `Scripts/Smoke-UEMCPAssetWorkflow.ps1` with a
+  local disk-import fixture, not marketplace content.
 - Interactive asset work must target a consuming `.uproject` by default, not
   `MCPGameProject`.
 - Fab may be required for the interactive workflow, but Fab must not become a
@@ -65,7 +67,7 @@ Use this ladder for asset work:
 
 1. Start the interactive asset workflow and wait for editor-backed readiness.
 2. Capture a baseline with `asset_intake_snapshot` for the target content roots.
-3. Use Fab or editor import UI to acquire assets into the project.
+3. Use the visible Fab UI or editor import UI to acquire assets into the project.
 4. Capture a second `asset_intake_snapshot` for the same roots.
 5. Compare the snapshots with `asset_intake_diff`.
 6. Write a project-owned manifest with `asset_intake_write_manifest`.
@@ -73,6 +75,9 @@ Use this ladder for asset work:
 8. Run project-pack compatibility gates or project-specific asset sentinels.
 9. Only then perform placement, Blueprint wiring, map saves, or other
    mutating editor-backed work.
+
+For the Fab-specific operator protocol, use
+[`fab-assisted-import.md`](fab-assisted-import.md).
 
 ## First-Class Asset Tools
 
@@ -83,17 +88,37 @@ Available now:
    class changes, dependency changes, and other metadata changes.
 3. `asset_intake_write_manifest`: write a project-owned JSON manifest under
    `Tools/UEMCP/asset-intake`.
+4. `asset_import_from_disk`: editor-backed import tasks for files already on
+   disk, with dry-run planning and post-import evidence.
+5. `asset_organize_plan`, `asset_rename`, `asset_move`, `asset_duplicate`,
+   `asset_delete`, `asset_save_packages`, and `asset_fixup_redirectors`:
+   exact-path organization primitives with editor-backed mutation.
+6. `asset_prepare_for_level` and `asset_create_blueprint_wrapper`: placement
+   readiness and optional Static Mesh wrapper Blueprint creation.
+7. `asset_place_in_level_plan`, `asset_place_in_level`, and
+   `asset_validate_level_placements`: map placement planning, mutation, and
+   verification.
 
-The interactive asset lane should grow next in this order:
+Project-specific target roots, allowed classes, naming prefixes, manifest
+notes, maps, and sentinel expectations belong in the consuming project's
+`Tools/UEMCP` pack.
 
-1. `asset_import_from_disk`: editor-backed import tasks for files already on
-   disk, with explicit target package paths and post-import evidence.
-2. `asset_organize`: editor-backed move, rename, duplicate, delete, fix-up
-   redirectors, and save-package operations with dry-run support.
-3. `asset_prepare_for_level`: validate meshes/materials/Blueprints for map
-   placement and optionally create placement-ready Blueprint wrappers.
-4. Project-pack asset intake recipes owned by consuming projects under
-   `Tools/UEMCP`.
+## Deterministic Asset Smoke
+
+Run the local fixture smoke when you need to prove the lane without Fab,
+browser, account, network, or entitlement state:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPAssetWorkflow.ps1 `
+  -SkipFab `
+  -CloseLaunchedEditor
+```
+
+The smoke launches the interactive workflow, captures a before snapshot, imports
+`Python/tests/fixtures/assets/SM_UEMCP_Smoke.obj` through
+`asset_import_from_disk`, captures an after snapshot, computes an
+`asset_intake_diff`, and optionally runs `asset_validate_level_placements` when
+expected actor names are supplied.
 
 ## Stop Rules
 

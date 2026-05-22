@@ -38,6 +38,19 @@ The first supported UEMCP tools are read-mostly:
 - `asset_intake_snapshot`
 - `asset_intake_diff`
 - `asset_intake_write_manifest`
+- `asset_import_from_disk`
+- `asset_organize_plan`
+- `asset_rename`
+- `asset_move`
+- `asset_duplicate`
+- `asset_delete`
+- `asset_save_packages`
+- `asset_fixup_redirectors`
+- `asset_prepare_for_level`
+- `asset_create_blueprint_wrapper`
+- `asset_place_in_level_plan`
+- `asset_place_in_level`
+- `asset_validate_level_placements`
 - `blueprint_query`
 - `get_project_context`
 - `get_failstate_context`
@@ -68,6 +81,14 @@ For the live Unreal bridge gate, run from the repo root:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPObservability.ps1 -CloseLaunchedEditor
+```
+
+For the deterministic asset workflow gate, run the local disk-import fixture
+smoke. This path does not depend on Fab, browser, account, network, or
+entitlement state:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Smoke-UEMCPAssetWorkflow.ps1 -SkipFab -CloseLaunchedEditor
 ```
 
 Against the Failstate worktree, attach the UEMCP repo plugin without installing it into the game project:

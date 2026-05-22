@@ -119,6 +119,14 @@ Set the transform (location, rotation, scale) of an actor.
 }
 ```
 
+### Asset-driven placement
+
+For placing imported Static Mesh or Actor Blueprint assets, prefer
+`asset_place_in_level_plan`, `asset_place_in_level`, and
+`asset_validate_level_placements` from [Asset Workflow Tools](asset_workflow_tools.md).
+Those tools pair placement mutations with asset readiness evidence, exact
+source package paths, current-map checks, and optional level save reporting.
+
 ### get_actor_properties
 
 Get read-only reflected properties of an actor.

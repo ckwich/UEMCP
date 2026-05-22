@@ -148,6 +148,69 @@ def test_asset_intake_snapshot_routes_to_asset_workflow_command_handler():
     assert "HandleAssetIntakeSnapshot" in command_source
 
 
+def test_asset_workflow_bridge_routes_import_organization_and_placement_commands():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+    command_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPAssetWorkflowCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    for command_name in [
+        "asset_import_from_disk",
+        "asset_rename",
+        "asset_move",
+        "asset_duplicate",
+        "asset_delete",
+        "asset_save_packages",
+        "asset_fixup_redirectors",
+        "asset_prepare_for_level",
+        "asset_create_blueprint_wrapper",
+        "asset_place_in_level",
+        "asset_validate_level_placements",
+    ]:
+        assert f'CommandType == TEXT("{command_name}")' in bridge_source
+        assert f'CommandType == TEXT("{command_name}")' in command_source
+
+    assert "UAssetImportTask" in command_source
+    assert "UEditorAssetSubsystem" in command_source
+    assert "FixupReferencers" in command_source
+    assert "UStaticMesh" in command_source
+
+
+def test_bridge_schedules_editor_commands_on_ticker_instead_of_nested_game_thread_task():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "FTSTicker::GetCoreTicker().AddTicker" in bridge_source
+    assert "AsyncTask(ENamedThreads::GameThread" not in bridge_source
+
+
 def test_pie_runtime_snapshot_bridge_targets_pie_worlds_explicitly():
     repo_root = Path(__file__).resolve().parents[2]
     bridge_source = (

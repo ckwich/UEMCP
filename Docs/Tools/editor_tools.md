@@ -32,6 +32,14 @@ Save the current editor level through Unreal's editor save API.
 
 `focus_viewport` and `take_screenshot` remain lower-level bridge commands and are not currently registered as Python MCP tools. Use the tool-surface audit manifest as the source of truth before exposing either command to agents.
 
+### Asset package operations
+
+Use [Asset Workflow Tools](asset_workflow_tools.md) for editor-backed asset
+imports, moves, renames, duplication, deletes, package saves, redirector
+fix-up, and Blueprint wrapper creation. Those tools keep exact package-path
+validation and dry-run evidence beside the asset workflow contract instead of
+mixing asset policy into generic editor commands.
+
 ## Error Handling
 
 All command responses include a "status" field indicating whether the operation succeeded, and an optional "message" field with details in case of failure.

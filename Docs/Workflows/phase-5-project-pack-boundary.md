@@ -36,9 +36,46 @@ The profile names content roots, automation prefixes, log categories, known maps
 - `sentinel_level_snapshots`: proves the current level can be observed through a bounded actor snapshot and can assert representative actor names, actor classes, component names/classes, total actor counts, filtered matched actor counts, or component counts.
 - `sentinel_asset_searches`: proves a content root resolves and named sentinel assets are discoverable.
 - `sentinel_blueprints`: proves a representative Blueprint resolves and reports expected class identity.
+- `asset_recipe_roots`: proves assets returned by a recipe snapshot stay under the recipe target roots.
+- `asset_recipe_classes`: proves imported assets use only recipe-owned allowed classes.
+- `asset_recipe_naming`: proves imported asset names start with one of the recipe naming prefixes.
+- `asset_recipe_dependencies`: proves dependencies stay under allowed dependency roots.
+- `asset_recipe_materials`, `asset_recipe_mesh_readiness`, and
+  `asset_recipe_blueprint_readiness`: reserved recipe gate names that currently
+  report structured recipe evidence until deeper project-specific validators
+  are added.
 - `automation_prefixes`: optionally overrides the top-level automation prefixes for compatibility validation.
 
 When `automation_prefixes` is omitted, the runner treats top-level `automation_test_prefixes` as compatibility gates.
+
+## Asset Recipes
+
+Project packs can add `asset_recipes` to a profile to describe post-import
+expectations without hard-coding content choices into public UEMCP.
+
+```json
+{
+  "asset_recipes": [
+    {
+      "name": "environment_prototype_pack",
+      "target_roots": ["/Game/Environment/Prototype"],
+      "allowed_classes": ["StaticMesh", "MaterialInstanceConstant", "Texture2D"],
+      "naming_prefixes": ["SM_", "MI_", "T_"],
+      "allowed_dependency_roots": ["/Game", "/Engine", "/Script"],
+      "post_import_gates": [
+        {"kind": "asset_recipe_roots"},
+        {"kind": "asset_recipe_classes"},
+        {"kind": "asset_recipe_naming"}
+      ]
+    }
+  ]
+}
+```
+
+See [`project-asset-recipes.example.json`](project-asset-recipes.example.json)
+for a neutral copyable shape. Concrete asset names, source URLs, license notes,
+target maps, and compatibility expectations belong in the consuming project's
+pack or ignored local profile files.
 
 ## Failstate Current Pack
 

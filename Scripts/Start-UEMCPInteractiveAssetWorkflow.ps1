@@ -4,6 +4,7 @@ param(
     [string]$PluginPath,
     [string]$ProfileName = $env:UEMCP_PROFILE_NAME,
     [string]$ProfileDir = $env:UEMCP_PROFILE_DIR,
+    [string[]]$ExpectedAssetRoots = @(),
     [int]$Port = 55557,
     [int]$StartupTimeoutSeconds = 300,
     [switch]$SkipBuild,
@@ -289,6 +290,10 @@ if ($ProfileName) {
 }
 
 Write-Output "ASSET_WORKFLOW_PREFLIGHT_OK project=$ResolvedProjectPath profile=$ProfileName"
+if ($ExpectedAssetRoots.Count -gt 0) {
+    $ExpectedAssetRootText = ($ExpectedAssetRoots | Where-Object { $_ } | ForEach-Object { $_.Trim() }) -join ","
+    Write-Output "ASSET_WORKFLOW_EXPECTED_ROOTS roots=$ExpectedAssetRootText"
+}
 
 if ($SkipLaunch) {
     return

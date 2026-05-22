@@ -1824,6 +1824,105 @@ def test_build_project_compatibility_gates_executes_profile_contracts(monkeypatc
     ]
 
 
+def test_build_project_compatibility_gates_executes_asset_recipe_gates(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "asset_recipes": [
+                    {
+                        "name": "environment_prototype_pack",
+                        "target_roots": ["/Game/Environment/Prototype"],
+                        "allowed_classes": ["StaticMesh", "MaterialInstanceConstant"],
+                        "naming_prefixes": ["SM_", "MI_"],
+                        "post_import_gates": [
+                            {"kind": "asset_recipe_roots"},
+                            {"kind": "asset_recipe_classes"},
+                            {"kind": "asset_recipe_naming"},
+                        ],
+                    }
+                ],
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "snapshot_id": "asset-snapshot-recipe",
+                    "roots": ["/Game/Environment/Prototype"],
+                    "asset_count": 2,
+                    "matched_asset_count": 2,
+                    "truncated": False,
+                    "asset_registry_loading": False,
+                    "assets": [
+                        {
+                            "asset_name": "SM_Rock",
+                            "package_name": "/Game/Environment/Prototype/SM_Rock",
+                            "package_path": "/Game/Environment/Prototype",
+                            "asset_class": "StaticMesh",
+                            "dependencies": [],
+                        },
+                        {
+                            "asset_name": "MI_Rock",
+                            "package_name": "/Game/Environment/Prototype/MI_Rock",
+                            "package_path": "/Game/Environment/Prototype",
+                            "asset_class": "MaterialInstanceConstant",
+                            "dependencies": [],
+                        },
+                    ],
+                    "warnings": [],
+                },
+            }
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+        require_ready=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "successful": True,
+    }
+    assert [gate["kind"] for gate in envelope["data"]["gates"]] == [
+        "asset_recipe_roots",
+        "asset_recipe_classes",
+        "asset_recipe_naming",
+    ]
+    assert connection.calls == [
+        (
+            "asset_intake_snapshot",
+            {
+                "roots": ["/Game/Environment/Prototype"],
+                "include_dependencies": True,
+                "include_referencers": False,
+                "include_tags": True,
+                "limit": 10000,
+            },
+        )
+    ]
+
+
 def test_build_project_compatibility_gates_reports_missing_sentinel_asset(
     monkeypatch,
     tmp_path,

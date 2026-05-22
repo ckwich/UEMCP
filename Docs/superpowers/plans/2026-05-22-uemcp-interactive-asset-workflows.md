@@ -214,11 +214,11 @@ uv --directory Python run pytest
 
 **Implementation Steps:**
 
-- [ ] Add `-ExpectedAssetRoots` to the launcher as a string array for preflight output only.
-- [ ] Add tests proving the launcher does not claim to automate Fab purchase/license actions.
-- [ ] Document visible UI stop points and allowed agent actions.
-- [ ] Add a checklist for recording asset source URL/name/license notes in the manifest.
-- [ ] Run validation:
+- [x] Add `-ExpectedAssetRoots` to the launcher as a string array for preflight output only.
+- [x] Add tests proving the launcher does not claim to automate Fab purchase/license actions.
+- [x] Document visible UI stop points and allowed agent actions.
+- [x] Add a checklist for recording asset source URL/name/license notes in the manifest.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow.py
@@ -253,13 +253,13 @@ uv --directory Python run python -m uemcp_neutrality
 
 **Implementation Steps:**
 
-- [ ] Add schema tests for required `source_files` and `destination_path`, optional `replace_existing`, `save_imported_assets`, and `dry_run`.
-- [ ] Validate destination paths must start with `/Game/`.
-- [ ] Dry-run returns normalized source file list, destination packages, conflicts, missing files, and no mutation.
-- [ ] Editor implementation uses `UAssetImportTask` and `FAssetToolsModule`.
-- [ ] Post-import response includes imported assets, failed files, warnings, dirty packages, and save status.
-- [ ] Do not auto-save by default; require `save_imported_assets: true`.
-- [ ] Run validation:
+- [x] Add schema tests for required `source_files` and `destination_path`, optional `replace_existing`, `save_imported_assets`, and `dry_run`.
+- [x] Validate destination paths must start with `/Game/`.
+- [x] Dry-run returns normalized source file list, destination packages, conflicts, missing files, and no mutation.
+- [x] Editor implementation uses `UAssetImportTask` and `FAssetToolsModule`.
+- [x] Post-import response includes imported assets, failed files, warnings, dirty packages, and save status.
+- [x] Do not auto-save by default; require `save_imported_assets: true`.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow_tools.py
@@ -289,12 +289,12 @@ uv --directory Python run pytest tests/test_asset_workflow_tools.py
 
 **Implementation Steps:**
 
-- [ ] Add tool-surface audit entries with safety `asset_mutation`.
-- [ ] Add tests requiring `dry_run` support for plan generation.
-- [ ] Implement operations with `UEditorAssetLibrary`, `FAssetToolsModule`, and editor save helpers.
-- [ ] Require exact package names for mutating calls; do not accept broad wildcards for delete.
-- [ ] Return changed packages and post-operation `asset_intake_snapshot` references when requested.
-- [ ] Run validation:
+- [x] Add tool-surface audit entries with safety `asset_mutation`.
+- [x] Add tests requiring `dry_run` support for plan generation.
+- [x] Implement operations with `UEditorAssetLibrary`, `FAssetToolsModule`, and editor save helpers.
+- [x] Require exact package names for mutating calls; do not accept broad wildcards for delete.
+- [x] Return changed packages and post-operation `asset_intake_snapshot` references when requested.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_tool_surface_audit.py
@@ -324,11 +324,11 @@ uv --directory Python run python -m uemcp_neutrality
 
 **Implementation Steps:**
 
-- [ ] Add profile schema tests for `asset_recipes`.
-- [ ] Implement generic gate evaluation from profile-owned recipe JSON.
-- [ ] Add C++ commands only where Asset Registry metadata is insufficient.
-- [ ] Keep project-specific expected names and roots in profile pack files.
-- [ ] Run validation:
+- [x] Add profile schema tests for `asset_recipes`.
+- [x] Implement generic gate evaluation from profile-owned recipe JSON.
+- [x] Add C++ commands only where Asset Registry metadata is insufficient.
+- [x] Keep project-specific expected names and roots in profile pack files.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_observability_contract.py tests/test_asset_workflow_tools.py
@@ -352,11 +352,11 @@ uv --directory Python run python -m uemcp_neutrality
 
 **Implementation Steps:**
 
-- [ ] Add tests for static mesh placement readiness fields: bounds, collision presence, material slots, Nanite flag if available, scale hints, and warnings.
-- [ ] Add Blueprint wrapper dry-run with generated package name and component plan.
-- [ ] Implement wrapper creation through existing Blueprint/component APIs or shared C++ helpers.
-- [ ] Require explicit target package path under `/Game/`.
-- [ ] Run validation:
+- [x] Add tests for static mesh placement readiness fields: bounds, collision presence, material slots, Nanite flag if available, scale hints, and warnings.
+- [x] Add Blueprint wrapper dry-run with generated package name and component plan.
+- [x] Implement wrapper creation through existing Blueprint/component APIs or shared C++ helpers.
+- [x] Require explicit target package path under `/Game/`.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_mcp_tool_contract.py
@@ -381,11 +381,11 @@ uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_m
 
 **Implementation Steps:**
 
-- [ ] Reuse existing actor spawn and transform tools rather than duplicating actor placement logic.
-- [ ] Require current map evidence from `get_editor_status`.
-- [ ] Dry-run returns actor names, classes, transforms, and target map.
-- [ ] Mutation returns created actors, changed packages, level snapshot evidence, and save status.
-- [ ] Run validation with the sample project and one disposable map if available.
+- [x] Reuse existing actor spawn and transform tools rather than duplicating actor placement logic.
+- [x] Require current map evidence from `get_editor_status`.
+- [x] Dry-run returns actor names, classes, transforms, and target map.
+- [x] Mutation returns created actors, changed packages, level snapshot evidence, and save status.
+- [x] Run validation with the sample project and one disposable map if available.
 
 ## Slice 9: Project-Pack Asset Recipes
 
@@ -418,10 +418,10 @@ uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_m
 
 **Implementation Steps:**
 
-- [ ] Add docs and tests for recipe shape.
-- [ ] Teach compatibility gates to load recipe gates from profile JSON.
-- [ ] Ensure neutrality audit permits only generic example paths.
-- [ ] Run validation:
+- [x] Add docs and tests for recipe shape.
+- [x] Teach compatibility gates to load recipe gates from profile JSON.
+- [x] Ensure neutrality audit permits only generic example paths.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_observability_contract.py
@@ -440,11 +440,11 @@ uv --directory Python run python -m uemcp_neutrality
 
 **Implementation Steps:**
 
-- [ ] Create a smoke script that starts the interactive workflow against a disposable project or explicit user-provided project.
-- [ ] Use disk-import fixture files for automation, not Fab marketplace content.
-- [ ] Run snapshot before import, disk import, snapshot after import, diff, quality gates, optional cleanup.
-- [ ] Keep cleanup editor-backed.
-- [ ] Run validation:
+- [x] Create a smoke script that starts the interactive workflow against a disposable project or explicit user-provided project.
+- [x] Use disk-import fixture files for automation, not Fab marketplace content.
+- [x] Run snapshot before import, disk import, snapshot after import, diff, quality gates, optional cleanup.
+- [x] Keep cleanup editor-backed.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest

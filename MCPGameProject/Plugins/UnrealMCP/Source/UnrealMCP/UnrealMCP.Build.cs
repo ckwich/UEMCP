@@ -48,12 +48,13 @@ public class UnrealMCP : ModuleRules
 				"SlateCore",
 				"UMG",
 				"Kismet",
-				"KismetCompiler",
-				"BlueprintGraph",
-				"Projects",
-				"AssetRegistry"
-			}
-		);
+					"KismetCompiler",
+					"BlueprintGraph",
+					"Projects",
+					"AssetRegistry",
+					"AssetTools"
+				}
+			);
 		
 		if (Target.bBuildEditor == true)
 		{
@@ -75,4 +76,4 @@ public class UnrealMCP : ModuleRules
 			}
 		);
 	}
-} 
+}

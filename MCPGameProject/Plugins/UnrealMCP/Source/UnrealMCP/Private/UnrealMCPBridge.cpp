@@ -22,7 +22,7 @@
 #include "Editor.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "Templates/Atomic.h"
 // Add Blueprint related includes
 #include "Engine/Blueprint.h"
@@ -302,7 +302,18 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
         {
             TSharedPtr<FJsonObject> ResultJson;
 
-            if (CommandType == TEXT("asset_intake_snapshot"))
+            if (CommandType == TEXT("asset_intake_snapshot") ||
+                CommandType == TEXT("asset_import_from_disk") ||
+                CommandType == TEXT("asset_rename") ||
+                CommandType == TEXT("asset_move") ||
+                CommandType == TEXT("asset_duplicate") ||
+                CommandType == TEXT("asset_delete") ||
+                CommandType == TEXT("asset_save_packages") ||
+                CommandType == TEXT("asset_fixup_redirectors") ||
+                CommandType == TEXT("asset_prepare_for_level") ||
+                CommandType == TEXT("asset_create_blueprint_wrapper") ||
+                CommandType == TEXT("asset_place_in_level") ||
+                CommandType == TEXT("asset_validate_level_placements"))
             {
                 ResultJson = AssetWorkflowCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
@@ -439,10 +450,15 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
     TPromise<FString> Promise;
     TFuture<FString> Future = Promise.GetFuture();
 
-    AsyncTask(ENamedThreads::GameThread, [ExecuteOnGameThread = MoveTemp(ExecuteOnGameThread), Promise = MoveTemp(Promise)]() mutable
-    {
-        Promise.SetValue(ExecuteOnGameThread());
-    });
+    FTSTicker::GetCoreTicker().AddTicker(
+        TEXT("UnrealMCP.ExecuteCommand"),
+        0.0f,
+        [ExecuteOnGameThread = MoveTemp(ExecuteOnGameThread), Promise = MoveTemp(Promise)](float) mutable
+        {
+            Promise.SetValue(ExecuteOnGameThread());
+            return false;
+        }
+    );
 
     const double TimeoutSeconds = GetGameThreadCommandTimeoutSeconds(CommandType, Params);
     if (!Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))

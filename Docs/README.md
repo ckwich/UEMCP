@@ -7,4 +7,6 @@ Welcome to the documentation for the Unreal Engine Model Context Protocol (MCP) 
 - [Tools](Tools/README.md) - All the tools that are available.
 - [Phase 1 Observability Workflow](Workflows/phase-1-observability.md) - The canonical readiness, automation, and summary ladder for finishing the observability foundation.
 - [Interactive Asset Workflow](Workflows/interactive-asset-workflow.md) - The separate Fab/editor UI lane for acquiring, importing, inspecting, and validating assets.
+- [Fab-Assisted Import](Workflows/fab-assisted-import.md) - The visible UI protocol and stop points for marketplace asset acquisition.
+- [Project Asset Recipes Example](Workflows/project-asset-recipes.example.json) - A neutral profile snippet for project-owned asset intake gates.
 

@@ -1,0 +1,22 @@
+{
+  "asset_recipes": [
+    {
+      "name": "environment_prototype_pack",
+      "target_roots": ["/Game/Environment/Prototype"],
+      "allowed_classes": [
+        "StaticMesh",
+        "MaterialInstanceConstant",
+        "Texture2D",
+        "Blueprint"
+      ],
+      "naming_prefixes": ["SM_", "MI_", "T_", "BP_"],
+      "allowed_dependency_roots": ["/Game", "/Engine", "/Script"],
+      "post_import_gates": [
+        {"kind": "asset_recipe_roots"},
+        {"kind": "asset_recipe_classes"},
+        {"kind": "asset_recipe_naming"},
+        {"kind": "asset_recipe_dependencies"}
+      ]
+    }
+  ]
+}

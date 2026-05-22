@@ -20,4 +20,15 @@ public:
 
 private:
     TSharedPtr<FJsonObject> HandleAssetIntakeSnapshot(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetImportFromDisk(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetRename(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetMove(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetDuplicate(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetDelete(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetSavePackages(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetFixupRedirectors(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetPrepareForLevel(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetCreateBlueprintWrapper(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetPlaceInLevel(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAssetValidateLevelPlacements(const TSharedPtr<FJsonObject>& Params);
 };

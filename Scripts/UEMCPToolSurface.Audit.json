@@ -24,7 +24,20 @@
     "asset_workflow": [
       "asset_intake_snapshot",
       "asset_intake_diff",
-      "asset_intake_write_manifest"
+      "asset_intake_write_manifest",
+      "asset_import_from_disk",
+      "asset_organize_plan",
+      "asset_rename",
+      "asset_move",
+      "asset_duplicate",
+      "asset_delete",
+      "asset_save_packages",
+      "asset_fixup_redirectors",
+      "asset_prepare_for_level",
+      "asset_create_blueprint_wrapper",
+      "asset_place_in_level_plan",
+      "asset_place_in_level",
+      "asset_validate_level_placements"
     ],
     "automation": [
       "run_automation_test",
@@ -213,6 +226,110 @@
       "requires_explicit_user_intent": true,
       "recommended_use": "Write a project-owned JSON manifest under Tools/UEMCP/asset-intake for a reviewed asset intake diff."
     },
+    "asset_import_from_disk": {
+      "category": "asset_workflow_import",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Import local source files through Unreal Editor import tasks after an explicit dry-run review."
+    },
+    "asset_organize_plan": {
+      "category": "asset_workflow_organization",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Validate an exact-path asset organization operation list before mutating packages."
+    },
+    "asset_rename": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Rename one exact Unreal asset package through editor-backed asset APIs."
+    },
+    "asset_move": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Move one exact Unreal asset package to an exact destination package path."
+    },
+    "asset_duplicate": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Duplicate one exact Unreal asset package to an exact destination package path."
+    },
+    "asset_delete": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Delete one exact Unreal asset package through editor-backed asset APIs after dry-run review."
+    },
+    "asset_save_packages": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Save explicit asset packages through the editor asset subsystem."
+    },
+    "asset_fixup_redirectors": {
+      "category": "asset_workflow_organization",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "List or fix redirectors under explicit /Game roots through AssetTools."
+    },
+    "asset_prepare_for_level": {
+      "category": "asset_workflow_placement",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Load one exact asset and report placement readiness fields such as bounds, collision, material slots, Nanite, and Blueprint actor class."
+    },
+    "asset_create_blueprint_wrapper": {
+      "category": "asset_workflow_placement",
+      "safety": "asset_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Create a placement-ready Blueprint wrapper for a StaticMesh at an explicit target package path."
+    },
+    "asset_place_in_level_plan": {
+      "category": "asset_workflow_placement",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Validate a map-placement plan before mutating the editor level."
+    },
+    "asset_place_in_level": {
+      "category": "asset_workflow_placement",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Place StaticMesh or Actor Blueprint assets into the current editor level with explicit transforms and save evidence."
+    },
+    "asset_validate_level_placements": {
+      "category": "asset_workflow_placement",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Validate expected placed actor names or labels in the current editor level."
+    },
     "blueprint_query": {
       "category": "observability",
       "safety": "read_only",
@@ -251,7 +368,7 @@
       "safety": "automation_execution",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["get_editor_status", "get_level_snapshot", "asset_search", "blueprint_query", "list_automation_tests", "run_automation_test"],
+      "uses_bridge_commands": ["get_editor_status", "get_level_snapshot", "asset_search", "blueprint_query", "list_automation_tests", "run_automation_test", "asset_intake_snapshot"],
       "requires_explicit_user_intent": true,
       "recommended_use": "Run profile-declared compatibility sentinels against the live editor."
     },

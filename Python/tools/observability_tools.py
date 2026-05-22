@@ -21,6 +21,7 @@ from uemcp_observability import (
     server_metadata,
     utc_now,
 )
+from tools.asset_workflow_tools import build_asset_intake_snapshot
 
 logger = logging.getLogger("UnrealMCP")
 
@@ -1457,6 +1458,116 @@ def _asset_search_gate(
     }
 
 
+def _asset_recipe_snapshot(
+    connection_factory: Callable[[], Any],
+    recipe: Dict[str, Any],
+) -> Dict[str, Any]:
+    roots = [str(root) for root in recipe.get("target_roots") or [] if str(root)]
+    return build_asset_intake_snapshot(
+        connection_factory,
+        roots=roots,
+        include_dependencies=True,
+        include_referencers=False,
+        include_tags=True,
+        limit=int(recipe.get("limit") or 10000),
+    )
+
+
+def _asset_recipe_gate(
+    connection_factory: Callable[[], Any],
+    recipe: Dict[str, Any],
+    gate_config: Dict[str, Any],
+    *,
+    index: int,
+    snapshot_envelope: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    kind = str(gate_config.get("kind") or "")
+    name = _gate_name(gate_config, f"{recipe.get('name') or 'asset_recipe'}_{kind}_{index}")
+    envelope = snapshot_envelope or _asset_recipe_snapshot(connection_factory, recipe)
+    data = dict(envelope.get("data") or {})
+    assets = [dict(asset) for asset in data.get("assets") or [] if isinstance(asset, dict)]
+    roots = [str(root) for root in recipe.get("target_roots") or [] if str(root)]
+    allowed_classes = {str(value) for value in recipe.get("allowed_classes") or [] if str(value)}
+    naming_prefixes = [str(value) for value in recipe.get("naming_prefixes") or [] if str(value)]
+    allowed_dependency_roots = [
+        str(value)
+        for value in recipe.get("allowed_dependency_roots") or ["/Game", "/Engine", "/Script"]
+        if str(value)
+    ]
+
+    errors: List[str] = []
+    warnings: List[str] = list(envelope.get("warnings") or [])
+    if not envelope.get("ok"):
+        errors.append(_error_message(envelope) or "Asset recipe snapshot failed")
+    if data.get("truncated"):
+        warnings.append("Asset recipe snapshot was truncated")
+    if data.get("asset_registry_loading"):
+        warnings.append("Asset Registry was still loading")
+
+    if kind == "asset_recipe_roots":
+        outside_roots = [
+            str(asset.get("package_name") or asset.get("package_path") or "")
+            for asset in assets
+            if roots and not any(str(asset.get("package_path") or "").startswith(root) for root in roots)
+        ]
+        if outside_roots:
+            errors.append(f"Assets outside recipe roots: {outside_roots}")
+    elif kind == "asset_recipe_classes":
+        disallowed_classes = sorted(
+            {
+                str(asset.get("asset_class") or "")
+                for asset in assets
+                if allowed_classes and str(asset.get("asset_class") or "") not in allowed_classes
+            }
+        )
+        if disallowed_classes:
+            errors.append(f"Disallowed asset classes: {disallowed_classes}")
+    elif kind == "asset_recipe_naming":
+        bad_names = [
+            str(asset.get("asset_name") or asset.get("package_name") or "")
+            for asset in assets
+            if naming_prefixes
+            and not any(str(asset.get("asset_name") or "").startswith(prefix) for prefix in naming_prefixes)
+        ]
+        if bad_names:
+            errors.append(f"Assets do not match naming prefixes: {bad_names}")
+    elif kind == "asset_recipe_dependencies":
+        bad_dependencies: List[str] = []
+        for asset in assets:
+            for dependency in asset.get("dependencies") or []:
+                dependency_name = str(dependency)
+                if dependency_name and not any(
+                    dependency_name.startswith(root) for root in allowed_dependency_roots
+                ):
+                    bad_dependencies.append(dependency_name)
+        if bad_dependencies:
+            errors.append(f"Unexpected dependency roots: {sorted(set(bad_dependencies))}")
+    elif kind in {
+        "asset_recipe_materials",
+        "asset_recipe_mesh_readiness",
+        "asset_recipe_blueprint_readiness",
+    }:
+        warnings.append(f"{kind} is deferred to asset_prepare_for_level evidence when configured")
+    else:
+        errors.append(f"Unsupported asset recipe gate kind: {kind}")
+
+    ok = bool(envelope.get("ok")) and not errors
+    return {
+        "name": name,
+        "kind": kind,
+        "tool": "asset_intake_snapshot",
+        "ok": ok,
+        "request_id": envelope.get("request_id"),
+        "message": f"{kind} passed" if ok else "; ".join(errors),
+        "errors": errors,
+        "warnings": warnings,
+        "recipe": recipe.get("name"),
+        "target_roots": roots,
+        "asset_count": len(assets),
+        "snapshot_id": data.get("snapshot_id"),
+    }
+
+
 def _map_gate(
     connection_factory: Callable[[], Any],
     gate_config: Dict[str, Any],
@@ -1940,6 +2051,27 @@ def build_project_compatibility_gates(
             gates.append(_blueprint_gate(connection_factory, gate_config, index=index))
         else:
             warnings.append(f"Skipping malformed sentinel_blueprint gate: {gate_config!r}")
+
+    asset_recipe_gate_index = 1
+    for recipe in profile.get("asset_recipes") or []:
+        if not isinstance(recipe, dict):
+            warnings.append(f"Skipping malformed asset recipe: {recipe!r}")
+            continue
+        recipe_snapshot_envelope = _asset_recipe_snapshot(connection_factory, recipe)
+        for gate_config in recipe.get("post_import_gates") or []:
+            if isinstance(gate_config, dict):
+                gates.append(
+                    _asset_recipe_gate(
+                        connection_factory,
+                        recipe,
+                        gate_config,
+                        index=asset_recipe_gate_index,
+                        snapshot_envelope=recipe_snapshot_envelope,
+                    )
+                )
+                asset_recipe_gate_index += 1
+            else:
+                warnings.append(f"Skipping malformed asset recipe gate: {gate_config!r}")
 
     if include_automation:
         for index, gate_config in enumerate(_automation_prefix_gate_configs(profile), 1):
