@@ -305,9 +305,11 @@ from tools.node_tools import register_blueprint_node_tools
 from tools.project_tools import register_project_tools
 from tools.umg_tools import register_umg_tools
 from tools.observability_tools import register_observability_tools
+from tools.asset_workflow_tools import register_asset_workflow_tools
 
 # Register tools
 register_observability_tools(mcp)
+register_asset_workflow_tools(mcp)
 register_editor_tools(mcp)
 register_blueprint_tools(mcp)
 register_blueprint_node_tools(mcp)

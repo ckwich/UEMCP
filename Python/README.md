@@ -35,6 +35,9 @@ The first supported UEMCP tools are read-mostly:
 - `asset_search`
 - `asset_dependencies`
 - `asset_referencers`
+- `asset_intake_snapshot`
+- `asset_intake_diff`
+- `asset_intake_write_manifest`
 - `blueprint_query`
 - `get_project_context`
 - `get_failstate_context`

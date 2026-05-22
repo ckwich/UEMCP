@@ -64,28 +64,35 @@ headless flags such as null rendering or unattended startup.
 Use this ladder for asset work:
 
 1. Start the interactive asset workflow and wait for editor-backed readiness.
-2. Capture a baseline with `asset_search` for the target content root.
+2. Capture a baseline with `asset_intake_snapshot` for the target content roots.
 3. Use Fab or editor import UI to acquire assets into the project.
-4. Capture a second `asset_search` for the same roots.
-5. Inspect new assets with `asset_dependencies` and `asset_referencers`.
-6. Run project-pack compatibility gates or project-specific asset sentinels.
-7. Only then perform placement, Blueprint wiring, map saves, or other
+4. Capture a second `asset_intake_snapshot` for the same roots.
+5. Compare the snapshots with `asset_intake_diff`.
+6. Write a project-owned manifest with `asset_intake_write_manifest`.
+7. Inspect surprising assets with `asset_dependencies` and `asset_referencers`.
+8. Run project-pack compatibility gates or project-specific asset sentinels.
+9. Only then perform placement, Blueprint wiring, map saves, or other
    mutating editor-backed work.
 
-## First-Class Future Tools
+## First-Class Asset Tools
 
-The interactive asset lane should grow in this order:
+Available now:
 
 1. `asset_intake_snapshot`: read-only snapshot of selected roots and classes.
 2. `asset_intake_diff`: compare two snapshots and report additions, removals,
-   class changes, dependency changes, and redirector risk.
-3. `asset_import_from_disk`: editor-backed import tasks for files already on
+   class changes, dependency changes, and other metadata changes.
+3. `asset_intake_write_manifest`: write a project-owned JSON manifest under
+   `Tools/UEMCP/asset-intake`.
+
+The interactive asset lane should grow next in this order:
+
+1. `asset_import_from_disk`: editor-backed import tasks for files already on
    disk, with explicit target package paths and post-import evidence.
-4. `asset_organize`: editor-backed move, rename, duplicate, delete, fix-up
+2. `asset_organize`: editor-backed move, rename, duplicate, delete, fix-up
    redirectors, and save-package operations with dry-run support.
-5. `asset_prepare_for_level`: validate meshes/materials/Blueprints for map
+3. `asset_prepare_for_level`: validate meshes/materials/Blueprints for map
    placement and optionally create placement-ready Blueprint wrappers.
-6. Project-pack asset intake recipes owned by consuming projects under
+4. Project-pack asset intake recipes owned by consuming projects under
    `Tools/UEMCP`.
 
 ## Stop Rules

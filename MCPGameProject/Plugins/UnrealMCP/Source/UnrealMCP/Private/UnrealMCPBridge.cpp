@@ -59,6 +59,7 @@
 #include "Commands/UnrealMCPProjectCommands.h"
 #include "Commands/UnrealMCPCommonUtils.h"
 #include "Commands/UnrealMCPUMGCommands.h"
+#include "Commands/UnrealMCPAssetWorkflowCommands.h"
 
 // Default settings
 #define MCP_SERVER_HOST "127.0.0.1"
@@ -116,6 +117,7 @@ FUnrealMCPBridge::FUnrealMCPBridge()
     BlueprintNodeCommands = MakeShared<FUnrealMCPBlueprintNodeCommands>();
     ProjectCommands = MakeShared<FUnrealMCPProjectCommands>();
     UMGCommands = MakeShared<FUnrealMCPUMGCommands>();
+    AssetWorkflowCommands = MakeShared<FUnrealMCPAssetWorkflowCommands>();
     FIPv4Address::Parse(MCP_SERVER_HOST, ServerAddress);
 }
 
@@ -128,6 +130,7 @@ FUnrealMCPBridge::~FUnrealMCPBridge()
     BlueprintNodeCommands.Reset();
     ProjectCommands.Reset();
     UMGCommands.Reset();
+    AssetWorkflowCommands.Reset();
 }
 
 // Start the MCP server
@@ -269,6 +272,7 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
     TSharedPtr<FUnrealMCPBlueprintNodeCommands> BlueprintNodeCommandsForTask = BlueprintNodeCommands;
     TSharedPtr<FUnrealMCPProjectCommands> ProjectCommandsForTask = ProjectCommands;
     TSharedPtr<FUnrealMCPUMGCommands> UMGCommandsForTask = UMGCommands;
+    TSharedPtr<FUnrealMCPAssetWorkflowCommands> AssetWorkflowCommandsForTask = AssetWorkflowCommands;
     TSharedRef<TAtomic<bool>, ESPMode::ThreadSafe> bCommandCancelled = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
 
     auto ExecuteOnGameThread = [
@@ -279,7 +283,8 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
         BlueprintCommandsForTask,
         BlueprintNodeCommandsForTask,
         ProjectCommandsForTask,
-        UMGCommandsForTask
+        UMGCommandsForTask,
+        AssetWorkflowCommandsForTask
     ]() -> FString
     {
         if (bCommandCancelled->Load())
@@ -297,7 +302,11 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
         {
             TSharedPtr<FJsonObject> ResultJson;
 
-            if (CommandType == TEXT("get_editor_status") ||
+            if (CommandType == TEXT("asset_intake_snapshot"))
+            {
+                ResultJson = AssetWorkflowCommandsForTask->HandleCommand(CommandType, SafeParams);
+            }
+            else if (CommandType == TEXT("get_editor_status") ||
                      CommandType == TEXT("get_output_log") ||
                      CommandType == TEXT("get_level_snapshot") ||
                      CommandType == TEXT("get_pie_runtime_snapshot") ||

@@ -56,6 +56,8 @@ pwsh -NoProfile -File Scripts/Start-UEMCPInteractiveAssetWorkflow.ps1 -AllowHarn
 
 ## Slice 1: Read-Only Intake Snapshot
 
+**Status:** Done in the first implementation wave.
+
 **Goal:** Add a rich read-only snapshot tool that records asset inventory before and after acquisition without loading or mutating packages.
 
 **Files:**
@@ -121,15 +123,15 @@ pwsh -NoProfile -File Scripts/Start-UEMCPInteractiveAssetWorkflow.ps1 -AllowHarn
 
 **Implementation Steps:**
 
-- [ ] Add failing schema tests in `Python/tests/test_asset_workflow_tools.py` that assert `asset_intake_snapshot` is registered, requires `roots`, supports optional classes/dependencies/referencers/tags/limit, and exposes no `ctx`.
-- [ ] Add failing contract tests that assert `UnrealMCPBridge.cpp` routes `asset_intake_snapshot` to `FUnrealMCPAssetWorkflowCommands`.
-- [ ] Implement Python builder in `Python/tools/asset_workflow_tools.py` using the existing bridge-call and envelope patterns from `Python/tools/editor_tools.py`.
-- [ ] Register the new tools from `Python/unreal_mcp_server.py`.
-- [ ] Add `FUnrealMCPAssetWorkflowCommands` and implement `HandleAssetIntakeSnapshot` using `IAssetRegistry`.
-- [ ] Clamp `limit` to a documented maximum such as 10000 and return `truncated: true` when exceeded.
-- [ ] Include `asset_registry_loading` and a warning when the registry is still scanning.
-- [ ] Update `Scripts/UEMCPToolSurface.Audit.json` and tool-surface tests with category `asset_workflow_observation`, safety `read_only`.
-- [ ] Run validation:
+- [x] Add failing schema tests in `Python/tests/test_asset_workflow_tools.py` that assert `asset_intake_snapshot` is registered, requires `roots`, supports optional classes/dependencies/referencers/tags/limit, and exposes no `ctx`.
+- [x] Add failing contract tests that assert `UnrealMCPBridge.cpp` routes `asset_intake_snapshot` to `FUnrealMCPAssetWorkflowCommands`.
+- [x] Implement Python builder in `Python/tools/asset_workflow_tools.py` using the existing bridge-call and envelope patterns from `Python/tools/editor_tools.py`.
+- [x] Register the new tools from `Python/unreal_mcp_server.py`.
+- [x] Add `FUnrealMCPAssetWorkflowCommands` and implement `HandleAssetIntakeSnapshot` using `IAssetRegistry`.
+- [x] Clamp `limit` to a documented maximum such as 10000 and return `truncated: true` when exceeded.
+- [x] Include `asset_registry_loading` and a warning when the registry is still scanning.
+- [x] Update `Scripts/UEMCPToolSurface.Audit.json` and tool-surface tests with category `asset_workflow_observation`, safety `read_only`.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_mcp_tool_contract.py tests/test_tool_surface_audit.py
@@ -138,6 +140,8 @@ uv --directory Python run pytest
 ```
 
 ## Slice 2: Snapshot Diff and Manifest
+
+**Status:** Done in the first implementation wave.
 
 **Goal:** Compare two snapshots and optionally write a JSON manifest that records what landed during asset intake.
 
@@ -174,12 +178,12 @@ uv --directory Python run pytest
 
 **Implementation Steps:**
 
-- [ ] Add pure-Python tests for diff behavior: added, removed, changed class, changed dependency, unchanged suppression.
-- [ ] Implement `Python/uemcp_asset_intake.py` with `normalize_snapshot`, `diff_snapshots`, and `write_manifest`.
-- [ ] Add tool builders for `asset_intake_diff` and `asset_intake_write_manifest`.
-- [ ] Make manifest writes refuse paths outside `Tools/UEMCP/asset-intake` unless `allow_custom_output_path` is true.
-- [ ] Ensure manifests contain timestamp, active profile, project path if available, source snapshot IDs, changed package names, and notes.
-- [ ] Run validation:
+- [x] Add pure-Python tests for diff behavior: added, removed, changed class, changed dependency, unchanged suppression.
+- [x] Implement `Python/uemcp_asset_intake.py` with `normalize_snapshot`, `diff_snapshots`, and `write_manifest`.
+- [x] Add tool builders for `asset_intake_diff` and `asset_intake_write_manifest`.
+- [x] Make manifest writes refuse paths outside `Tools/UEMCP/asset-intake` unless `allow_custom_output_path` is true.
+- [x] Ensure manifests contain timestamp, active profile, project path if available, source snapshot IDs, changed package names, and notes.
+- [x] Run validation:
 
 ```bash
 uv --directory Python run pytest tests/test_asset_workflow_tools.py tests/test_asset_intake_manifest.py

@@ -21,6 +21,11 @@
       "get_project_context",
       "get_failstate_context"
     ],
+    "asset_workflow": [
+      "asset_intake_snapshot",
+      "asset_intake_diff",
+      "asset_intake_write_manifest"
+    ],
     "automation": [
       "run_automation_test",
       "run_profile_automation_tests",
@@ -183,6 +188,30 @@
       "bridge_command": true,
       "requires_explicit_user_intent": false,
       "recommended_use": "Read hard and soft referencer metadata for one asset package."
+    },
+    "asset_intake_snapshot": {
+      "category": "asset_workflow_observation",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Capture read-only Asset Registry inventory for one or more roots before and after interactive asset acquisition."
+    },
+    "asset_intake_diff": {
+      "category": "asset_workflow_observation",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Compare two asset intake snapshots and report added, removed, changed, and optionally unchanged assets."
+    },
+    "asset_intake_write_manifest": {
+      "category": "asset_workflow_manifest",
+      "safety": "viewport_or_file_output",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Write a project-owned JSON manifest under Tools/UEMCP/asset-intake for a reviewed asset intake diff."
     },
     "blueprint_query": {
       "category": "observability",

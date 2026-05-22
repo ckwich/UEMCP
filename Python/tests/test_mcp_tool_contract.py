@@ -118,6 +118,36 @@ def test_pie_runtime_snapshot_is_exposed_as_separate_observability_tool():
     assert "pie_instance_index" not in (schema.get("required") or [])
 
 
+def test_asset_intake_snapshot_routes_to_asset_workflow_command_handler():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+    command_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPAssetWorkflowCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'CommandType == TEXT("asset_intake_snapshot")' in bridge_source
+    assert "AssetWorkflowCommandsForTask->HandleCommand" in bridge_source
+    assert "IAssetRegistry" in command_source
+    assert "HandleAssetIntakeSnapshot" in command_source
+
+
 def test_pie_runtime_snapshot_bridge_targets_pie_worlds_explicitly():
     repo_root = Path(__file__).resolve().parents[2]
     bridge_source = (
