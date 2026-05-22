@@ -12,6 +12,11 @@ Editor tools provide explicit editor-level commands through the Unreal bridge. M
 
 Save the current editor level through Unreal's editor save API.
 
+For new MCP workflows, prefer `level_save` from
+[Level Workflow Tools](level_workflow_tools.md). It reports dirty map-related
+packages and can include external actor packages, which is safer for batch map
+construction.
+
 **Parameters:**
 - `only_if_dirty` (boolean, optional) - Skip the save call when the current level package is not dirty, defaults to true
 

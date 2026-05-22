@@ -29,6 +29,11 @@ MAX_PROFILE_AUTOMATION_RUNS = 50
 MAX_EVENT_SNIPPETS = 5
 MAX_READINESS_SAMPLES = 5
 MAX_OBSERVABILITY_HISTORY_EVENTS = 100
+MAP_RECIPE_STATUS_GATE_KINDS = {"map_recipe_current_map"}
+MAP_RECIPE_SNAPSHOT_GATE_KINDS = {
+    "map_recipe_expected_actors",
+    "map_recipe_min_actor_count",
+}
 
 _OBSERVABILITY_HISTORY_LOCK = Lock()
 _OBSERVABILITY_HISTORY: Deque[Dict[str, Any]] = deque(
@@ -1662,6 +1667,283 @@ def _component_count(actors: List[Dict[str, Any]], field: str) -> int:
     return count
 
 
+def _string_list(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned: List[str] = []
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
+def _map_recipe_expected_map(recipe: Dict[str, Any], gate_config: Dict[str, Any]) -> str:
+    return str(
+        gate_config.get("expected_map")
+        or gate_config.get("target_map")
+        or recipe.get("target_map")
+        or ""
+    ).strip()
+
+
+def _map_recipe_expected_actor_dicts(recipe: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        dict(actor)
+        for actor in recipe.get("expected_actors") or []
+        if isinstance(actor, dict)
+    ]
+
+
+def _map_recipe_expected_actor_names(
+    recipe: Dict[str, Any],
+    gate_config: Dict[str, Any],
+) -> List[str]:
+    explicit = gate_config.get("expected_actor_names")
+    if explicit is None:
+        explicit = recipe.get("expected_actor_names")
+    if explicit is not None:
+        return _string_list(explicit)
+
+    names: List[str] = []
+    for actor in _map_recipe_expected_actor_dicts(recipe):
+        for field in ("actor_name", "name", "label"):
+            value = actor.get(field)
+            if value:
+                names.append(str(value))
+                break
+    return names
+
+
+def _map_recipe_expected_actor_classes(
+    recipe: Dict[str, Any],
+    gate_config: Dict[str, Any],
+) -> List[str]:
+    explicit = gate_config.get("expected_actor_classes")
+    if explicit is None:
+        explicit = recipe.get("expected_actor_classes")
+    if explicit is not None:
+        return _string_list(explicit)
+
+    classes: List[str] = []
+    for actor in _map_recipe_expected_actor_dicts(recipe):
+        for field in ("class", "actor_class", "class_name"):
+            value = actor.get(field)
+            if value:
+                classes.append(str(value))
+                break
+    return classes
+
+
+def _map_recipe_snapshot_limit(recipe: Dict[str, Any], gate_configs: List[Dict[str, Any]]) -> int:
+    limit = int(recipe.get("snapshot_limit") or recipe.get("limit") or 1000)
+    for gate_config in gate_configs:
+        gate_limit = gate_config.get("snapshot_limit") or gate_config.get("limit")
+        if gate_limit:
+            limit = max(limit, int(gate_limit))
+    return max(1, min(limit, 1000))
+
+
+def _map_recipe_needs_status(gate_configs: List[Dict[str, Any]]) -> bool:
+    return any(
+        str(gate.get("kind") or "") in MAP_RECIPE_STATUS_GATE_KINDS
+        for gate in gate_configs
+    )
+
+
+def _map_recipe_needs_snapshot(gate_configs: List[Dict[str, Any]]) -> bool:
+    return any(
+        str(gate.get("kind") or "") in MAP_RECIPE_SNAPSHOT_GATE_KINDS
+        for gate in gate_configs
+    )
+
+
+def _map_recipe_gate(
+    recipe: Dict[str, Any],
+    gate_config: Dict[str, Any],
+    *,
+    index: int,
+    status_envelope: Optional[Dict[str, Any]] = None,
+    snapshot_envelope: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    kind = str(gate_config.get("kind") or "")
+    name = _gate_name(gate_config, f"{recipe.get('name') or 'map_recipe'}_{kind}_{index}")
+    recipe_name = recipe.get("name")
+    target_map = recipe.get("target_map")
+
+    if kind == "map_recipe_current_map":
+        envelope = status_envelope
+        data = dict(envelope.get("data") or {}) if envelope else {}
+        current_map = str(data.get("current_map") or "")
+        expected_map = _map_recipe_expected_map(recipe, gate_config)
+        errors: List[str] = []
+        warnings: List[str] = list(envelope.get("warnings") or []) if envelope else []
+
+        if envelope is None:
+            errors.append("Map recipe current map gate did not run editor status")
+        elif not envelope.get("ok"):
+            errors.append(_error_message(envelope) or "Editor status command failed")
+        if not expected_map:
+            errors.append("Map recipe current map gate is missing expected_map or recipe target_map")
+        if not current_map:
+            errors.append("Editor status did not report current_map")
+        if expected_map and current_map and current_map != expected_map:
+            errors.append(
+                "Unexpected current map: "
+                f"{current_map!r}, expected {expected_map!r}"
+            )
+
+        ok = bool(envelope and envelope.get("ok")) and not errors
+        return {
+            "name": name,
+            "kind": kind,
+            "tool": "get_editor_status",
+            "ok": ok,
+            "request_id": envelope.get("request_id") if envelope else None,
+            "message": "Map recipe current map passed" if ok else "; ".join(errors),
+            "errors": errors,
+            "warnings": warnings,
+            "recipe": recipe_name,
+            "target_map": target_map,
+            "current_map": current_map,
+            "expected_map": expected_map,
+            "editor": _editor_identity(data),
+        }
+
+    if kind == "map_recipe_expected_actors":
+        envelope = snapshot_envelope
+        data = dict(envelope.get("data") or {}) if envelope else {}
+        actors = [
+            dict(actor)
+            for actor in data.get("actors") or []
+            if isinstance(actor, dict)
+        ]
+        expected_actor_names = _map_recipe_expected_actor_names(recipe, gate_config)
+        expected_actor_classes = _map_recipe_expected_actor_classes(recipe, gate_config)
+        actor_names = set(_actor_values(actors, ["name", "label", "path"]))
+        actor_classes = set(_actor_values(actors, ["class", "class_name", "class_path"]))
+        missing_actor_names = [
+            actor_name
+            for actor_name in expected_actor_names
+            if actor_name not in actor_names
+        ]
+        missing_actor_classes = [
+            actor_class
+            for actor_class in expected_actor_classes
+            if actor_class not in actor_classes
+        ]
+        errors = []
+        warnings = list(envelope.get("warnings") or []) if envelope else []
+
+        if envelope is None:
+            errors.append("Map recipe expected actors gate did not run level snapshot")
+        elif not envelope.get("ok"):
+            errors.append(_error_message(envelope) or "Level snapshot command failed")
+        if not expected_actor_names and not expected_actor_classes:
+            errors.append("Map recipe expected actors gate has no expected actor names or classes")
+        if missing_actor_names:
+            errors.append(f"Missing expected actor names: {', '.join(missing_actor_names)}")
+        if missing_actor_classes:
+            errors.append(f"Missing expected actor classes: {', '.join(missing_actor_classes)}")
+        if data.get("truncated") and (missing_actor_names or missing_actor_classes):
+            warnings.append("Level snapshot was truncated before all expected map recipe actors were found")
+
+        ok = bool(envelope and envelope.get("ok")) and not errors
+        return {
+            "name": name,
+            "kind": kind,
+            "tool": "get_level_snapshot",
+            "ok": ok,
+            "request_id": envelope.get("request_id") if envelope else None,
+            "message": "Map recipe expected actors passed" if ok else "; ".join(errors),
+            "errors": errors,
+            "warnings": warnings,
+            "recipe": recipe_name,
+            "target_map": target_map,
+            "current_map": data.get("current_map"),
+            "total_actor_count": int(data.get("total_actor_count") or len(actors)),
+            "returned_actor_count": int(data.get("returned_actor_count") or len(actors)),
+            "truncated": bool(data.get("truncated", False)),
+            "filters": dict(data.get("filters") or {}),
+            "expected_actor_names": expected_actor_names,
+            "missing_actor_names": missing_actor_names,
+            "expected_actor_classes": expected_actor_classes,
+            "missing_actor_classes": missing_actor_classes,
+        }
+
+    if kind == "map_recipe_min_actor_count":
+        envelope = snapshot_envelope
+        data = dict(envelope.get("data") or {}) if envelope else {}
+        actors = [
+            dict(actor)
+            for actor in data.get("actors") or []
+            if isinstance(actor, dict)
+        ]
+        expected_names = _map_recipe_expected_actor_names(recipe, gate_config)
+        min_total_actor_count = max(
+            0,
+            int(
+                gate_config.get("min_total_actor_count")
+                or gate_config.get("min_actor_count")
+                or recipe.get("min_total_actor_count")
+                or len(expected_names)
+                or 0
+            ),
+        )
+        total_actor_count = int(data.get("total_actor_count") or len(actors))
+        errors = []
+        warnings = list(envelope.get("warnings") or []) if envelope else []
+
+        if envelope is None:
+            errors.append("Map recipe actor count gate did not run level snapshot")
+        elif not envelope.get("ok"):
+            errors.append(_error_message(envelope) or "Level snapshot command failed")
+        if min_total_actor_count <= 0:
+            errors.append("Map recipe actor count gate requires min_total_actor_count or expected actors")
+        if min_total_actor_count and total_actor_count < min_total_actor_count:
+            errors.append(
+                "Map recipe level snapshot reported "
+                f"{total_actor_count} total actors, expected at least {min_total_actor_count}"
+            )
+        if data.get("truncated"):
+            warnings.append("Level snapshot was truncated before the full map recipe actor count was known")
+
+        ok = bool(envelope and envelope.get("ok")) and not errors
+        return {
+            "name": name,
+            "kind": kind,
+            "tool": "get_level_snapshot",
+            "ok": ok,
+            "request_id": envelope.get("request_id") if envelope else None,
+            "message": "Map recipe actor count passed" if ok else "; ".join(errors),
+            "errors": errors,
+            "warnings": warnings,
+            "recipe": recipe_name,
+            "target_map": target_map,
+            "current_map": data.get("current_map"),
+            "total_actor_count": total_actor_count,
+            "returned_actor_count": int(data.get("returned_actor_count") or len(actors)),
+            "min_total_actor_count": min_total_actor_count,
+            "truncated": bool(data.get("truncated", False)),
+            "filters": dict(data.get("filters") or {}),
+        }
+
+    return {
+        "name": name,
+        "kind": kind,
+        "tool": None,
+        "ok": False,
+        "request_id": None,
+        "message": f"Unsupported map recipe gate kind: {kind}",
+        "errors": [f"Unsupported map recipe gate kind: {kind}"],
+        "warnings": [],
+        "recipe": recipe_name,
+        "target_map": target_map,
+    }
+
+
 def _level_snapshot_gate(
     connection_factory: Callable[[], Any],
     gate_config: Dict[str, Any],
@@ -2072,6 +2354,51 @@ def build_project_compatibility_gates(
                 asset_recipe_gate_index += 1
             else:
                 warnings.append(f"Skipping malformed asset recipe gate: {gate_config!r}")
+
+    map_recipe_gate_index = 1
+    for recipe in profile.get("map_recipes") or []:
+        if not isinstance(recipe, dict):
+            warnings.append(f"Skipping malformed map recipe: {recipe!r}")
+            continue
+
+        raw_gate_configs = recipe.get("post_construction_gates") or []
+        gate_configs = [
+            dict(gate_config)
+            for gate_config in raw_gate_configs
+            if isinstance(gate_config, dict)
+        ]
+        malformed_gates = [
+            gate_config
+            for gate_config in raw_gate_configs
+            if not isinstance(gate_config, dict)
+        ]
+        for malformed_gate in malformed_gates:
+            warnings.append(f"Skipping malformed map recipe gate: {malformed_gate!r}")
+
+        status_envelope = (
+            build_editor_status(connection_factory)
+            if _map_recipe_needs_status(gate_configs)
+            else None
+        )
+        snapshot_envelope = (
+            build_level_snapshot(
+                connection_factory,
+                limit=_map_recipe_snapshot_limit(recipe, gate_configs),
+            )
+            if _map_recipe_needs_snapshot(gate_configs)
+            else None
+        )
+        for gate_config in gate_configs:
+            gates.append(
+                _map_recipe_gate(
+                    recipe,
+                    gate_config,
+                    index=map_recipe_gate_index,
+                    status_envelope=status_envelope,
+                    snapshot_envelope=snapshot_envelope,
+                )
+            )
+            map_recipe_gate_index += 1
 
     if include_automation:
         for index, gate_config in enumerate(_automation_prefix_gate_configs(profile), 1):

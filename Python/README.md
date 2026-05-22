@@ -51,6 +51,13 @@ The first supported UEMCP tools are read-mostly:
 - `asset_place_in_level_plan`
 - `asset_place_in_level`
 - `asset_validate_level_placements`
+- `level_list_maps`
+- `level_create`
+- `level_open`
+- `level_save`
+- `level_construction_plan`
+- `level_apply_construction_plan`
+- `level_validate_construction`
 - `blueprint_query`
 - `get_project_context`
 - `get_failstate_context`

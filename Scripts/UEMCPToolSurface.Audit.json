@@ -47,7 +47,10 @@
     "level_read": [
       "get_actors_in_level",
       "find_actors_by_name",
-      "get_actor_properties"
+      "get_actor_properties",
+      "level_list_maps",
+      "level_construction_plan",
+      "level_validate_construction"
     ],
     "level_mutation": [
       "spawn_actor",
@@ -56,7 +59,11 @@
       "set_actor_transform",
       "set_actor_property",
       "spawn_blueprint_actor",
-      "save_current_level"
+      "save_current_level",
+      "level_create",
+      "level_open",
+      "level_save",
+      "level_apply_construction_plan"
     ],
     "blueprint_asset_mutation": [
       "create_blueprint",
@@ -108,7 +115,9 @@
       "safety": "read_only",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["ping"],
+      "uses_bridge_commands": [
+        "ping"
+      ],
       "requires_explicit_user_intent": false,
       "recommended_use": "First reachability check for the Python MCP server and Unreal bridge."
     },
@@ -125,7 +134,9 @@
       "safety": "read_only",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["get_editor_status"],
+      "uses_bridge_commands": [
+        "get_editor_status"
+      ],
       "requires_explicit_user_intent": false,
       "recommended_use": "Preflight readiness gate before automation or compatibility checks."
     },
@@ -134,7 +145,11 @@
       "safety": "read_only",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["ping", "get_editor_status", "get_output_log"],
+      "uses_bridge_commands": [
+        "ping",
+        "get_editor_status",
+        "get_output_log"
+      ],
       "requires_explicit_user_intent": false,
       "recommended_use": "Compact diagnostic when readiness is blocked or before running automation."
     },
@@ -359,7 +374,11 @@
       "safety": "automation_execution",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["list_automation_tests", "run_automation_test", "get_output_log"],
+      "uses_bridge_commands": [
+        "list_automation_tests",
+        "run_automation_test",
+        "get_output_log"
+      ],
       "requires_explicit_user_intent": true,
       "recommended_use": "Run a bounded project profile automation batch with compact evidence."
     },
@@ -368,7 +387,15 @@
       "safety": "automation_execution",
       "exposure": "mcp_registered",
       "bridge_command": false,
-      "uses_bridge_commands": ["get_editor_status", "get_level_snapshot", "asset_search", "blueprint_query", "list_automation_tests", "run_automation_test", "asset_intake_snapshot"],
+      "uses_bridge_commands": [
+        "get_editor_status",
+        "get_level_snapshot",
+        "asset_search",
+        "blueprint_query",
+        "list_automation_tests",
+        "run_automation_test",
+        "asset_intake_snapshot"
+      ],
       "requires_explicit_user_intent": true,
       "recommended_use": "Run profile-declared compatibility sentinels against the live editor."
     },
@@ -683,6 +710,62 @@
       "bridge_command": true,
       "requires_explicit_user_intent": true,
       "recommended_use": "Bridge-only legacy component-node command; prefer registered graph tools."
+    },
+    "level_list_maps": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "List map packages under exact /Game roots before opening or constructing levels."
+    },
+    "level_create": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Create a new editor-owned map package after dirty-map preflight and explicit user intent."
+    },
+    "level_open": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Open one exact map package through Unreal Editor loading APIs after dirty-map preflight."
+    },
+    "level_save": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Save the current editor map and map-related packages with structured dirty-package evidence."
+    },
+    "level_construction_plan": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": false,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Validate a declarative level construction operation list before editor mutation."
+    },
+    "level_apply_construction_plan": {
+      "category": "level_mutation",
+      "safety": "level_mutation",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": true,
+      "recommended_use": "Apply a validated exact-actor level construction plan through editor-owned APIs."
+    },
+    "level_validate_construction": {
+      "category": "level_read",
+      "safety": "read_only",
+      "exposure": "mcp_registered",
+      "bridge_command": true,
+      "requires_explicit_user_intent": false,
+      "recommended_use": "Validate expected exact actors, classes, folders, tags, and transforms in the current editor map."
     }
   }
 }

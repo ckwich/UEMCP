@@ -194,6 +194,47 @@ def test_asset_workflow_bridge_routes_import_organization_and_placement_commands
     assert "UStaticMesh" in command_source
 
 
+def test_level_workflow_bridge_routes_lifecycle_and_construction_commands():
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+    command_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "UnrealMCPLevelWorkflowCommands.cpp"
+    ).read_text(encoding="utf-8")
+
+    for command_name in [
+        "level_list_maps",
+        "level_create",
+        "level_open",
+        "level_save",
+        "level_apply_construction_plan",
+        "level_validate_construction",
+    ]:
+        assert f'CommandType == TEXT("{command_name}")' in bridge_source
+        assert f'CommandType == TEXT("{command_name}")' in command_source
+
+    assert "LevelWorkflowCommandsForTask->HandleCommand" in bridge_source
+    assert "UEditorLoadingAndSavingUtils" in command_source
+    assert "UEditorActorSubsystem" in command_source
+    assert "SavePackages" in command_source
+
+
 def test_bridge_schedules_editor_commands_on_ticker_instead_of_nested_game_thread_task():
     repo_root = Path(__file__).resolve().parents[2]
     bridge_source = (

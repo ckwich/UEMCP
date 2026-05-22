@@ -11,6 +11,7 @@
 #include "Commands/UnrealMCPProjectCommands.h"
 #include "Commands/UnrealMCPUMGCommands.h"
 #include "Commands/UnrealMCPAssetWorkflowCommands.h"
+#include "Commands/UnrealMCPLevelWorkflowCommands.h"
 
 class FMCPServerRunnable;
 
@@ -54,4 +55,5 @@ private:
 	TSharedPtr<FUnrealMCPProjectCommands> ProjectCommands;
 	TSharedPtr<FUnrealMCPUMGCommands> UMGCommands;
 	TSharedPtr<FUnrealMCPAssetWorkflowCommands> AssetWorkflowCommands;
+	TSharedPtr<FUnrealMCPLevelWorkflowCommands> LevelWorkflowCommands;
 };

@@ -60,6 +60,7 @@
 #include "Commands/UnrealMCPCommonUtils.h"
 #include "Commands/UnrealMCPUMGCommands.h"
 #include "Commands/UnrealMCPAssetWorkflowCommands.h"
+#include "Commands/UnrealMCPLevelWorkflowCommands.h"
 
 // Default settings
 #define MCP_SERVER_HOST "127.0.0.1"
@@ -118,6 +119,7 @@ FUnrealMCPBridge::FUnrealMCPBridge()
     ProjectCommands = MakeShared<FUnrealMCPProjectCommands>();
     UMGCommands = MakeShared<FUnrealMCPUMGCommands>();
     AssetWorkflowCommands = MakeShared<FUnrealMCPAssetWorkflowCommands>();
+    LevelWorkflowCommands = MakeShared<FUnrealMCPLevelWorkflowCommands>();
     FIPv4Address::Parse(MCP_SERVER_HOST, ServerAddress);
 }
 
@@ -131,6 +133,7 @@ FUnrealMCPBridge::~FUnrealMCPBridge()
     ProjectCommands.Reset();
     UMGCommands.Reset();
     AssetWorkflowCommands.Reset();
+    LevelWorkflowCommands.Reset();
 }
 
 // Start the MCP server
@@ -273,6 +276,7 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
     TSharedPtr<FUnrealMCPProjectCommands> ProjectCommandsForTask = ProjectCommands;
     TSharedPtr<FUnrealMCPUMGCommands> UMGCommandsForTask = UMGCommands;
     TSharedPtr<FUnrealMCPAssetWorkflowCommands> AssetWorkflowCommandsForTask = AssetWorkflowCommands;
+    TSharedPtr<FUnrealMCPLevelWorkflowCommands> LevelWorkflowCommandsForTask = LevelWorkflowCommands;
     TSharedRef<TAtomic<bool>, ESPMode::ThreadSafe> bCommandCancelled = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
 
     auto ExecuteOnGameThread = [
@@ -284,7 +288,8 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
         BlueprintNodeCommandsForTask,
         ProjectCommandsForTask,
         UMGCommandsForTask,
-        AssetWorkflowCommandsForTask
+        AssetWorkflowCommandsForTask,
+        LevelWorkflowCommandsForTask
     ]() -> FString
     {
         if (bCommandCancelled->Load())
@@ -316,6 +321,15 @@ FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                 CommandType == TEXT("asset_validate_level_placements"))
             {
                 ResultJson = AssetWorkflowCommandsForTask->HandleCommand(CommandType, SafeParams);
+            }
+            else if (CommandType == TEXT("level_list_maps") ||
+                     CommandType == TEXT("level_create") ||
+                     CommandType == TEXT("level_open") ||
+                     CommandType == TEXT("level_save") ||
+                     CommandType == TEXT("level_apply_construction_plan") ||
+                     CommandType == TEXT("level_validate_construction"))
+            {
+                ResultJson = LevelWorkflowCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             else if (CommandType == TEXT("get_editor_status") ||
                      CommandType == TEXT("get_output_log") ||

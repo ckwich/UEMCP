@@ -1,0 +1,38 @@
+{
+  "name": "uemcp_level_smoke",
+  "target_map": "/Game/UEMCP/Smoke/Maps/L_UEMCP_LevelSmoke",
+  "operations": [
+    {
+      "op": "ensure_actor",
+      "actor_name": "UEMCP_LevelSmoke_PointLight",
+      "actor_class": "/Script/Engine.PointLight",
+      "label": "UEMCP Level Smoke Point Light",
+      "folder_path": "UEMCP/Smoke",
+      "location": [0.0, 0.0, 180.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [1.0, 1.0, 1.0],
+      "tags": ["UEMCPSmoke"]
+    }
+  ],
+  "expected_actors": [
+    {
+      "actor_name": "UEMCP_LevelSmoke_PointLight",
+      "class": "PointLight",
+      "folder_path": "UEMCP/Smoke",
+      "tags": ["UEMCPSmoke"],
+      "location": [0.0, 0.0, 180.0]
+    }
+  ],
+  "post_construction_gates": [
+    {
+      "kind": "map_recipe_current_map"
+    },
+    {
+      "kind": "map_recipe_expected_actors"
+    },
+    {
+      "kind": "map_recipe_min_actor_count",
+      "min_total_actor_count": 1
+    }
+  ]
+}

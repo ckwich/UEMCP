@@ -9,4 +9,6 @@ Welcome to the documentation for the Unreal Engine Model Context Protocol (MCP) 
 - [Interactive Asset Workflow](Workflows/interactive-asset-workflow.md) - The separate Fab/editor UI lane for acquiring, importing, inspecting, and validating assets.
 - [Fab-Assisted Import](Workflows/fab-assisted-import.md) - The visible UI protocol and stop points for marketplace asset acquisition.
 - [Project Asset Recipes Example](Workflows/project-asset-recipes.example.json) - A neutral profile snippet for project-owned asset intake gates.
+- [Level Map Construction](Workflows/level-map-construction.md) - The editor-owned lane for creating, opening, constructing, saving, and validating maps.
+- [Project Map Recipes Example](Workflows/project-map-recipes.example.json) - A neutral profile snippet for project-owned map construction gates.
 

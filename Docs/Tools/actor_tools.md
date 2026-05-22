@@ -127,6 +127,13 @@ For placing imported Static Mesh or Actor Blueprint assets, prefer
 Those tools pair placement mutations with asset readiness evidence, exact
 source package paths, current-map checks, and optional level save reporting.
 
+### Batch map construction
+
+For creating or opening maps, applying multi-actor recipes, validating expected
+actors, and saving map packages, prefer [Level Workflow Tools](level_workflow_tools.md).
+Those tools require exact map package paths and exact actor names, and they
+refuse dirty-map transitions unless saving is explicitly requested.
+
 ### get_actor_properties
 
 Get read-only reflected properties of an actor.

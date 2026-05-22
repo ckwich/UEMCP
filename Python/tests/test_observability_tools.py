@@ -1923,6 +1923,202 @@ def test_build_project_compatibility_gates_executes_asset_recipe_gates(monkeypat
     ]
 
 
+def test_build_project_compatibility_gates_executes_map_recipe_gates(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "map_recipes": [
+                    {
+                        "name": "example_combat_shell",
+                        "target_map": "/Game/Example/Maps/L_CombatShell",
+                        "snapshot_limit": 50,
+                        "expected_actors": [
+                            {
+                                "actor_name": "EncounterAnchor",
+                                "class": "BP_EncounterAnchor_C",
+                            }
+                        ],
+                        "post_construction_gates": [
+                            {"kind": "map_recipe_current_map"},
+                            {"kind": "map_recipe_expected_actors"},
+                            {
+                                "kind": "map_recipe_min_actor_count",
+                                "min_total_actor_count": 3,
+                            },
+                        ],
+                    }
+                ],
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_CombatShell",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_CombatShell",
+                    "total_actor_count": 3,
+                    "matched_actor_count": 3,
+                    "returned_actor_count": 3,
+                    "truncated": False,
+                    "actors": [
+                        {
+                            "name": "EncounterAnchor",
+                            "label": "Encounter Anchor",
+                            "class": "BP_EncounterAnchor_C",
+                        },
+                        {"name": "Floor", "class": "StaticMeshActor"},
+                        {"name": "KeyLight", "class": "PointLight"},
+                    ],
+                    "filters": {"limit": 50},
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+        require_ready=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "successful": True,
+    }
+    assert [gate["kind"] for gate in envelope["data"]["gates"]] == [
+        "map_recipe_current_map",
+        "map_recipe_expected_actors",
+        "map_recipe_min_actor_count",
+    ]
+    assert envelope["data"]["observability_events"] == []
+    assert connection.calls == [
+        ("get_editor_status", {}),
+        ("get_level_snapshot", {"limit": 50}),
+    ]
+
+
+def test_build_project_compatibility_gates_reports_map_recipe_failures(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "profiles"
+    project_path = tmp_path / "ExampleProject"
+    worktree_path = project_path / ".worktrees" / "active"
+    profile_dir.mkdir()
+    worktree_path.mkdir(parents=True)
+    (profile_dir / "example.json").write_text(
+        json.dumps(
+            {
+                "name": "example",
+                "project_path": str(project_path).replace("\\", "/"),
+                "preferred_worktree_path": str(worktree_path).replace("\\", "/"),
+                "engine_version": "5.7",
+                "content_roots": ["Content/Example"],
+                "map_recipes": [
+                    {
+                        "name": "example_combat_shell",
+                        "target_map": "/Game/Example/Maps/L_CombatShell",
+                        "expected_actors": [
+                            {
+                                "actor_name": "EncounterAnchor",
+                                "class": "BP_EncounterAnchor_C",
+                            }
+                        ],
+                        "post_construction_gates": [
+                            {"kind": "map_recipe_current_map"},
+                            {"kind": "map_recipe_expected_actors"},
+                            {
+                                "kind": "map_recipe_min_actor_count",
+                                "min_total_actor_count": 2,
+                            },
+                        ],
+                    }
+                ],
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UEMCP_PROFILE_DIR", str(profile_dir))
+    connection = SequenceUnrealConnection(
+        [
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Unexpected",
+                    "is_pie_running": False,
+                    "is_slow_task_active": False,
+                },
+            },
+            {
+                "status": "success",
+                "result": {
+                    "current_map": "/Game/Example/Maps/L_Unexpected",
+                    "total_actor_count": 1,
+                    "matched_actor_count": 1,
+                    "returned_actor_count": 1,
+                    "truncated": False,
+                    "actors": [
+                        {"name": "Floor", "class": "StaticMeshActor"},
+                    ],
+                    "filters": {"limit": 1000},
+                },
+            },
+        ]
+    )
+
+    envelope = build_project_compatibility_gates(
+        lambda: connection,
+        profile_name="example",
+        include_automation=False,
+        require_ready=False,
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["summary"] == {
+        "total": 3,
+        "passed": 0,
+        "failed": 3,
+        "successful": False,
+    }
+    current_map_gate, actor_gate, count_gate = envelope["data"]["gates"]
+    assert current_map_gate["ok"] is False
+    assert current_map_gate["current_map"] == "/Game/Example/Maps/L_Unexpected"
+    assert current_map_gate["expected_map"] == "/Game/Example/Maps/L_CombatShell"
+    assert actor_gate["missing_actor_names"] == ["EncounterAnchor"]
+    assert actor_gate["missing_actor_classes"] == ["BP_EncounterAnchor_C"]
+    assert count_gate["total_actor_count"] == 1
+    assert count_gate["min_total_actor_count"] == 2
+    assert [event["type"] for event in envelope["data"]["observability_events"]] == [
+        "compatibility_gate_failed",
+        "compatibility_gate_failed",
+        "compatibility_gate_failed",
+    ]
+
+
 def test_build_project_compatibility_gates_reports_missing_sentinel_asset(
     monkeypatch,
     tmp_path,
