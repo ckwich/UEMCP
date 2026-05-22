@@ -231,13 +231,13 @@ void FUnrealMCPBridge::StopServer()
     // Close sockets
     if (ConnectionSocket.IsValid())
     {
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ConnectionSocket.Get());
+        ConnectionSocket->Close();
         ConnectionSocket.Reset();
     }
 
     if (ListenerSocket.IsValid())
     {
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ListenerSocket.Get());
+        ListenerSocket->Close();
         ListenerSocket.Reset();
     }
 

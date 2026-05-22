@@ -311,6 +311,8 @@ def test_socket_bridge_accumulates_json_and_sends_utf8_bytes():
     assert "Buffer[BytesRead] = " not in server_source
     assert "GetObjectField(TEXT(\"params\"))" not in server_source
     assert "IsInGameThread()" in bridge_source
+    assert "DestroySocket(ConnectionSocket.Get())" not in bridge_source
+    assert "DestroySocket(ListenerSocket.Get())" not in bridge_source
 
 
 def test_unreal_bridge_is_module_owned_and_ping_does_not_wait_for_editor_startup():
