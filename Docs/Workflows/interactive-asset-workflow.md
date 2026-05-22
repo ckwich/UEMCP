@@ -49,10 +49,10 @@ plugin, attach the repo plugin with `-PluginPath`:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./Scripts/Start-UEMCPInteractiveAssetWorkflow.ps1 `
-  -ProjectPath '/Users/ckwichman/Documents/Projects/Failstate/Failstate.uproject' `
-  -PluginPath '/Users/ckwichman/Documents/Projects/uemcp/MCPGameProject/Plugins/UnrealMCP/UnrealMCP.uplugin' `
-  -ProfileDir '/Users/ckwichman/Documents/Projects/Failstate/Tools/UEMCP/profiles' `
-  -ProfileName failstate `
+  -ProjectPath '/path/to/YourProject/YourProject.uproject' `
+  -PluginPath '/path/to/uemcp/MCPGameProject/Plugins/UnrealMCP/UnrealMCP.uplugin' `
+  -ProfileDir '/path/to/YourProject/Tools/UEMCP/profiles' `
+  -ProfileName your-project `
   -WaitForEditorReady
 ```
 
