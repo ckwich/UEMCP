@@ -54,7 +54,7 @@ namespace
     }
 }
 
-FMCPServerRunnable::FMCPServerRunnable(UUnrealMCPBridge* InBridge, TSharedPtr<FSocket> InListenerSocket)
+FMCPServerRunnable::FMCPServerRunnable(FUnrealMCPBridge* InBridge, TSharedPtr<FSocket> InListenerSocket)
     : Bridge(InBridge)
     , ListenerSocket(InListenerSocket)
     , bRunning(true)

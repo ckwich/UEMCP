@@ -33,4 +33,22 @@ def test_smoke_script_has_macos_unreal_paths_and_socket_probe():
     assert "Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" in script
     assert "Engine/Build/BatchFiles/RunUBT.sh" in script
     assert "[System.Net.Sockets.TcpClient]" in script
+    assert "EditorReadyTimeoutSeconds" in script
+    assert "UEMCP editor-backed commands ready" in script
     assert "Get-NetTCPConnection" not in script
+
+
+def test_smoke_project_disables_unneeded_fab_editor_plugin():
+    project = json.loads((REPO_ROOT / "MCPGameProject" / "MCPGameProject.uproject").read_text())
+
+    plugin_settings = {plugin["Name"]: plugin for plugin in project["Plugins"]}
+    assert plugin_settings["Fab"]["Enabled"] is False
+
+
+def test_smoke_project_uses_lightweight_default_map():
+    default_engine = (REPO_ROOT / "MCPGameProject" / "Config" / "DefaultEngine.ini").read_text()
+
+    assert "EditorStartupMap=/Engine/Maps/Templates/Template_Default" in default_engine
+    assert "GameDefaultMap=/Engine/Maps/Templates/Template_Default" in default_engine
+    assert "EditorStartupMap=/Engine/Maps/Templates/OpenWorld" not in default_engine
+    assert "GameDefaultMap=/Engine/Maps/Templates/OpenWorld" not in default_engine

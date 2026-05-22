@@ -18,10 +18,12 @@
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "JsonObjectConverter.h"
+#include "CoreGlobals.h"
+#include "Editor.h"
 #include "GameFramework/Actor.h"
-#include "Engine/Selection.h"
 #include "Kismet/GameplayStatics.h"
 #include "Async/Async.h"
+#include "Templates/Atomic.h"
 // Add Blueprint related includes
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -62,17 +64,65 @@
 #define MCP_SERVER_HOST "127.0.0.1"
 #define MCP_SERVER_PORT 55557
 
-UUnrealMCPBridge::UUnrealMCPBridge()
+namespace
+{
+    FString SerializeBridgeErrorResponse(const FString& ErrorMessage)
+    {
+        TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
+        ResponseJson->SetStringField(TEXT("status"), TEXT("error"));
+        ResponseJson->SetStringField(TEXT("error"), ErrorMessage);
+
+        FString Response;
+        TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Response);
+        FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
+        return Response;
+    }
+
+    double GetGameThreadCommandTimeoutSeconds(
+        const FString& CommandType,
+        const TSharedPtr<FJsonObject>& Params
+    )
+    {
+        if (CommandType == TEXT("get_editor_status"))
+        {
+            return 3.0;
+        }
+
+        if (CommandType == TEXT("run_automation_test"))
+        {
+            double RequestedTimeoutSeconds = 30.0;
+            if (Params.IsValid())
+            {
+                Params->TryGetNumberField(TEXT("timeout_seconds"), RequestedTimeoutSeconds);
+            }
+
+            return FMath::Clamp(RequestedTimeoutSeconds + 15.0, 15.0, 135.0);
+        }
+
+        return 25.0;
+    }
+}
+
+FUnrealMCPBridge::FUnrealMCPBridge()
+    : bIsRunning(false)
+    , ListenerSocket(nullptr)
+    , ConnectionSocket(nullptr)
+    , ServerRunnable(nullptr)
+    , ServerThread(nullptr)
+    , Port(MCP_SERVER_PORT)
 {
     EditorCommands = MakeShared<FUnrealMCPEditorCommands>();
     BlueprintCommands = MakeShared<FUnrealMCPBlueprintCommands>();
     BlueprintNodeCommands = MakeShared<FUnrealMCPBlueprintNodeCommands>();
     ProjectCommands = MakeShared<FUnrealMCPProjectCommands>();
     UMGCommands = MakeShared<FUnrealMCPUMGCommands>();
+    FIPv4Address::Parse(MCP_SERVER_HOST, ServerAddress);
 }
 
-UUnrealMCPBridge::~UUnrealMCPBridge()
+FUnrealMCPBridge::~FUnrealMCPBridge()
 {
+    StopServer();
+
     EditorCommands.Reset();
     BlueprintCommands.Reset();
     BlueprintNodeCommands.Reset();
@@ -80,31 +130,8 @@ UUnrealMCPBridge::~UUnrealMCPBridge()
     UMGCommands.Reset();
 }
 
-// Initialize subsystem
-void UUnrealMCPBridge::Initialize(FSubsystemCollectionBase& Collection)
-{
-    UE_LOG(LogTemp, Display, TEXT("UnrealMCPBridge: Initializing"));
-    
-    bIsRunning = false;
-    ListenerSocket = nullptr;
-    ConnectionSocket = nullptr;
-    ServerThread = nullptr;
-    Port = MCP_SERVER_PORT;
-    FIPv4Address::Parse(MCP_SERVER_HOST, ServerAddress);
-
-    // Start the server automatically
-    StartServer();
-}
-
-// Clean up resources when subsystem is destroyed
-void UUnrealMCPBridge::Deinitialize()
-{
-    UE_LOG(LogTemp, Display, TEXT("UnrealMCPBridge: Shutting down"));
-    StopServer();
-}
-
 // Start the MCP server
-void UUnrealMCPBridge::StartServer()
+void FUnrealMCPBridge::StartServer()
 {
     if (bIsRunning)
     {
@@ -152,8 +179,9 @@ void UUnrealMCPBridge::StartServer()
     UE_LOG(LogTemp, Display, TEXT("UnrealMCPBridge: Server started on %s:%d"), *ServerAddress.ToString(), Port);
 
     // Start server thread
+    ServerRunnable = new FMCPServerRunnable(this, ListenerSocket);
     ServerThread = FRunnableThread::Create(
-        new FMCPServerRunnable(this, ListenerSocket),
+        ServerRunnable,
         TEXT("UnrealMCPServerThread"),
         0, TPri_Normal
     );
@@ -161,13 +189,15 @@ void UUnrealMCPBridge::StartServer()
     if (!ServerThread)
     {
         UE_LOG(LogTemp, Error, TEXT("UnrealMCPBridge: Failed to create server thread"));
+        delete ServerRunnable;
+        ServerRunnable = nullptr;
         StopServer();
         return;
     }
 }
 
 // Stop the MCP server
-void UUnrealMCPBridge::StopServer()
+void FUnrealMCPBridge::StopServer()
 {
     if (!bIsRunning)
     {
@@ -177,12 +207,20 @@ void UUnrealMCPBridge::StopServer()
     bIsRunning = false;
 
     // Clean up thread
+    if (ServerRunnable)
+    {
+        ServerRunnable->Stop();
+    }
+
     if (ServerThread)
     {
-        ServerThread->Kill(true);
+        ServerThread->WaitForCompletion();
         delete ServerThread;
         ServerThread = nullptr;
     }
+
+    delete ServerRunnable;
+    ServerRunnable = nullptr;
 
     // Close sockets
     if (ConnectionSocket.IsValid())
@@ -201,12 +239,57 @@ void UUnrealMCPBridge::StopServer()
 }
 
 // Execute a command received from a client
-FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+FString FUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
     UE_LOG(LogTemp, Display, TEXT("UnrealMCPBridge: Executing command: %s"), *CommandType);
 
-    auto ExecuteOnGameThread = [this, CommandType, Params]() -> FString
+    if (CommandType == TEXT("ping"))
     {
+        TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
+        TSharedPtr<FJsonObject> ResultJson = MakeShared<FJsonObject>();
+        ResultJson->SetStringField(TEXT("message"), TEXT("pong"));
+        ResponseJson->SetStringField(TEXT("status"), TEXT("success"));
+        ResponseJson->SetObjectField(TEXT("result"), ResultJson);
+
+        FString ResultString;
+        TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultString);
+        FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
+        return ResultString;
+    }
+
+    if (!GIsRunning || !GEditor)
+    {
+        return SerializeBridgeErrorResponse(
+            TEXT("Unreal Editor is still starting up; editor-backed UEMCP commands are not available yet")
+        );
+    }
+
+    TSharedPtr<FUnrealMCPEditorCommands> EditorCommandsForTask = EditorCommands;
+    TSharedPtr<FUnrealMCPBlueprintCommands> BlueprintCommandsForTask = BlueprintCommands;
+    TSharedPtr<FUnrealMCPBlueprintNodeCommands> BlueprintNodeCommandsForTask = BlueprintNodeCommands;
+    TSharedPtr<FUnrealMCPProjectCommands> ProjectCommandsForTask = ProjectCommands;
+    TSharedPtr<FUnrealMCPUMGCommands> UMGCommandsForTask = UMGCommands;
+    TSharedRef<TAtomic<bool>, ESPMode::ThreadSafe> bCommandCancelled = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
+
+    auto ExecuteOnGameThread = [
+        CommandType,
+        Params,
+        bCommandCancelled,
+        EditorCommandsForTask,
+        BlueprintCommandsForTask,
+        BlueprintNodeCommandsForTask,
+        ProjectCommandsForTask,
+        UMGCommandsForTask
+    ]() -> FString
+    {
+        if (bCommandCancelled->Load())
+        {
+            return SerializeBridgeErrorResponse(FString::Printf(
+                TEXT("Command was cancelled before reaching the Unreal editor game thread: %s"),
+                *CommandType
+            ));
+        }
+
         TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
         TSharedPtr<FJsonObject> SafeParams = Params.IsValid() ? Params : MakeShared<FJsonObject>();
 
@@ -214,13 +297,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
         {
             TSharedPtr<FJsonObject> ResultJson;
 
-            if (CommandType == TEXT("ping"))
-            {
-                ResultJson = MakeShared<FJsonObject>();
-                ResultJson->SetStringField(TEXT("message"), TEXT("pong"));
-            }
-            // Editor Commands (including actor manipulation)
-            else if (CommandType == TEXT("get_editor_status") ||
+            if (CommandType == TEXT("get_editor_status") ||
                      CommandType == TEXT("get_output_log") ||
                      CommandType == TEXT("get_level_snapshot") ||
                      CommandType == TEXT("get_pie_runtime_snapshot") ||
@@ -243,7 +320,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("focus_viewport") || 
                      CommandType == TEXT("take_screenshot"))
             {
-                ResultJson = EditorCommands->HandleCommand(CommandType, SafeParams);
+                ResultJson = EditorCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             // Blueprint Commands
             else if (CommandType == TEXT("create_blueprint") || 
@@ -255,7 +332,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_static_mesh_properties") ||
                      CommandType == TEXT("set_pawn_properties"))
             {
-                ResultJson = BlueprintCommands->HandleCommand(CommandType, SafeParams);
+                ResultJson = BlueprintCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             // Blueprint Node Commands
             else if (CommandType == TEXT("connect_blueprint_nodes") || 
@@ -268,12 +345,12 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("add_blueprint_get_component_node") ||
                      CommandType == TEXT("add_blueprint_variable"))
             {
-                ResultJson = BlueprintNodeCommands->HandleCommand(CommandType, SafeParams);
+                ResultJson = BlueprintNodeCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             // Project Commands
             else if (CommandType == TEXT("create_input_mapping"))
             {
-                ResultJson = ProjectCommands->HandleCommand(CommandType, SafeParams);
+                ResultJson = ProjectCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             // UMG Commands
             else if (CommandType == TEXT("create_umg_widget_blueprint") ||
@@ -283,7 +360,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_text_block_binding") ||
                      CommandType == TEXT("add_widget_to_viewport"))
             {
-                ResultJson = UMGCommands->HandleCommand(CommandType, SafeParams);
+                ResultJson = UMGCommandsForTask->HandleCommand(CommandType, SafeParams);
             }
             else
             {
@@ -357,6 +434,17 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
     {
         Promise.SetValue(ExecuteOnGameThread());
     });
+
+    const double TimeoutSeconds = GetGameThreadCommandTimeoutSeconds(CommandType, Params);
+    if (!Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))
+    {
+        bCommandCancelled->Store(true);
+        return SerializeBridgeErrorResponse(FString::Printf(
+            TEXT("Timed out waiting %.1f seconds for the Unreal editor game thread while executing command: %s"),
+            TimeoutSeconds,
+            *CommandType
+        ));
+    }
 
     return Future.Get();
 }

@@ -10,12 +10,15 @@
 void FUnrealMCPModule::StartupModule()
 {
 	FUEMCPOutputLogCapture::Get().Register();
+	Bridge = MakeUnique<FUnrealMCPBridge>();
+	Bridge->StartServer();
 	UE_LOG(LogTemp, Display, TEXT("Unreal MCP Module has started"));
 }
 
 void FUnrealMCPModule::ShutdownModule()
 {
 	UE_LOG(LogTemp, Display, TEXT("Unreal MCP Module has shut down"));
+	Bridge.Reset();
 	FUEMCPOutputLogCapture::Get().Unregister();
 }
 

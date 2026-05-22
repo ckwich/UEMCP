@@ -6,6 +6,7 @@ param(
     [string]$ProfileDir = $env:UEMCP_PROFILE_DIR,
     [int]$Port = 55557,
     [int]$StartupTimeoutSeconds = 300,
+    [int]$EditorReadyTimeoutSeconds = 300,
     [switch]$SkipBuild,
     [switch]$SkipLaunch,
     [switch]$CloseLaunchedEditor
@@ -125,6 +126,58 @@ function Test-UemcpBridgeListener {
         return $false
     }
     finally {
+        $Client.Close()
+    }
+}
+
+function Invoke-UemcpBridgeCommand([string]$CommandType, [hashtable]$Params = @{}, [int]$TimeoutMilliseconds = 5000) {
+    $Client = [System.Net.Sockets.TcpClient]::new()
+    $Memory = [System.IO.MemoryStream]::new()
+    try {
+        $Connect = $Client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $Connect.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            return $null
+        }
+
+        $Client.EndConnect($Connect)
+        $Client.NoDelay = $true
+
+        $Stream = $Client.GetStream()
+        $Stream.ReadTimeout = $TimeoutMilliseconds
+        $Payload = @{
+            type = $CommandType
+            params = $Params
+        } | ConvertTo-Json -Compress -Depth 20
+        $PayloadBytes = [System.Text.Encoding]::UTF8.GetBytes($Payload)
+        $Stream.Write($PayloadBytes, 0, $PayloadBytes.Length)
+
+        $Buffer = New-Object byte[] 4096
+        while (($BytesRead = $Stream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
+            $Memory.Write($Buffer, 0, $BytesRead)
+            $Text = [System.Text.Encoding]::UTF8.GetString($Memory.ToArray())
+            try {
+                return $Text | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                # Response JSON is not complete yet.
+            }
+        }
+
+        if ($Memory.Length -eq 0) {
+            return $null
+        }
+
+        $FinalText = [System.Text.Encoding]::UTF8.GetString($Memory.ToArray())
+        return $FinalText | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        return [pscustomobject]@{
+            status = "error"
+            error = $_.Exception.Message
+        }
+    }
+    finally {
+        $Memory.Dispose()
         $Client.Close()
     }
 }
@@ -259,6 +312,31 @@ try {
     }
 
     Write-Output "UEMCP bridge listening on 127.0.0.1:$Port."
+
+    $EditorReadyDeadline = (Get-Date).AddSeconds($EditorReadyTimeoutSeconds)
+    $EditorReadyResponse = $null
+    while ((Get-Date) -lt $EditorReadyDeadline) {
+        $EditorReadyResponse = Invoke-UemcpBridgeCommand `
+            -CommandType "get_editor_status" `
+            -Params @{} `
+            -TimeoutMilliseconds 5000
+        if ($EditorReadyResponse -and $EditorReadyResponse.status -eq "success") {
+            break
+        }
+
+        if ($LaunchedEditor -and $LaunchedEditor.HasExited) {
+            throw "Unreal Editor exited before UEMCP editor-backed commands became ready."
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $EditorReadyResponse -or $EditorReadyResponse.status -ne "success") {
+        $LastEditorReadyError = if ($EditorReadyResponse) { $EditorReadyResponse.error } else { "no response" }
+        throw "Timed out waiting for UEMCP editor-backed commands on 127.0.0.1:$Port. Last status: $LastEditorReadyError"
+    }
+
+    Write-Output "UEMCP editor-backed commands ready on 127.0.0.1:$Port."
 
     $env:UEMCP_SMOKE_EXPECTED_PROJECT = $ResolvedProjectPath
 

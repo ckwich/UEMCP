@@ -5,7 +5,7 @@
 #include "Sockets.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 
-class UUnrealMCPBridge;
+class FUnrealMCPBridge;
 class FJsonObject;
 
 /**
@@ -14,7 +14,7 @@ class FJsonObject;
 class FMCPServerRunnable : public FRunnable
 {
 public:
-	FMCPServerRunnable(UUnrealMCPBridge* InBridge, TSharedPtr<FSocket> InListenerSocket);
+	FMCPServerRunnable(FUnrealMCPBridge* InBridge, TSharedPtr<FSocket> InListenerSocket);
 	virtual ~FMCPServerRunnable();
 
 	// FRunnable interface
@@ -40,7 +40,7 @@ private:
 	void ProcessJsonCommand(const TSharedPtr<FJsonObject>& JsonObject, const FString& ReceivedText);
 	bool SendUtf8Response(const FString& Response);
 
-	UUnrealMCPBridge* Bridge;
+	FUnrealMCPBridge* Bridge;
 	TSharedPtr<FSocket> ListenerSocket;
 	TSharedPtr<FSocket> ClientSocket;
 	bool bRunning;

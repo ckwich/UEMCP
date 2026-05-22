@@ -179,6 +179,53 @@ def test_socket_bridge_accumulates_json_and_sends_utf8_bytes():
     assert "IsInGameThread()" in bridge_source
 
 
+def test_unreal_bridge_is_module_owned_and_ping_does_not_wait_for_editor_startup():
+    repo_root = Path(__file__).resolve().parents[2]
+    module_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPModule.cpp"
+    ).read_text(encoding="utf-8")
+    bridge_header = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Public"
+        / "UnrealMCPBridge.h"
+    ).read_text(encoding="utf-8")
+    bridge_source = (
+        repo_root
+        / "MCPGameProject"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "UnrealMCPBridge.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "Bridge = MakeUnique<FUnrealMCPBridge>()" in module_source
+    assert "Bridge->StartServer()" in module_source
+    assert "UEditorSubsystem" not in bridge_header
+    assert "CommandType == TEXT(\"ping\")" in bridge_source
+    assert "!GIsRunning || !GEditor" in bridge_source
+    assert "GetGameThreadCommandTimeoutSeconds" in bridge_source
+    assert "Future.WaitFor" in bridge_source
+    assert "bCommandCancelled->Store(true)" in bridge_source
+    assert "Command was cancelled before reaching the Unreal editor game thread" in bridge_source
+    assert "EditorCommandsForTask = EditorCommands" in bridge_source
+    assert "[this, CommandType, Params]" not in bridge_source
+    assert "Unreal Editor is still starting up" in bridge_source
+
+
 def test_editor_actor_commands_use_editor_world_transactions():
     repo_root = Path(__file__).resolve().parents[2]
     editor_source = (

@@ -1,40 +1,30 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "EditorSubsystem.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
-#include "Http.h"
 #include "Json.h"
 #include "Interfaces/IPv4/IPv4Address.h"
-#include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "Commands/UnrealMCPEditorCommands.h"
 #include "Commands/UnrealMCPBlueprintCommands.h"
 #include "Commands/UnrealMCPBlueprintNodeCommands.h"
 #include "Commands/UnrealMCPProjectCommands.h"
 #include "Commands/UnrealMCPUMGCommands.h"
-#include "UnrealMCPBridge.generated.h"
 
 class FMCPServerRunnable;
 
 /**
- * Editor subsystem for MCP Bridge
+ * Module-owned MCP bridge.
+ *
  * Handles communication between external tools and the Unreal Editor
  * through a TCP socket connection. Commands are received as JSON and
  * routed to appropriate command handlers.
  */
-UCLASS()
-class UNREALMCP_API UUnrealMCPBridge : public UEditorSubsystem
+class UNREALMCP_API FUnrealMCPBridge
 {
-	GENERATED_BODY()
-
 public:
-	UUnrealMCPBridge();
-	virtual ~UUnrealMCPBridge();
-
-	// UEditorSubsystem implementation
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void Deinitialize() override;
+	FUnrealMCPBridge();
+	~FUnrealMCPBridge();
 
 	// Server functions
 	void StartServer();
@@ -49,6 +39,7 @@ private:
 	bool bIsRunning;
 	TSharedPtr<FSocket> ListenerSocket;
 	TSharedPtr<FSocket> ConnectionSocket;
+	FMCPServerRunnable* ServerRunnable;
 	FRunnableThread* ServerThread;
 
 	// Server configuration
@@ -61,4 +52,4 @@ private:
 	TSharedPtr<FUnrealMCPBlueprintNodeCommands> BlueprintNodeCommands;
 	TSharedPtr<FUnrealMCPProjectCommands> ProjectCommands;
 	TSharedPtr<FUnrealMCPUMGCommands> UMGCommands;
-}; 
+};
