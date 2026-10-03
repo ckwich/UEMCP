@@ -38,7 +38,9 @@ def test_python_only_tool_can_be_called_without_context_argument():
 
     result = asyncio.run(run_call())
 
-    assert result[0].text
+    # mcp>=1.10 returns (content_blocks, structured_content); older SDKs returned the list directly.
+    content = result[0] if isinstance(result, tuple) else result
+    assert content[0].text
 
 
 def test_spawn_blueprint_actor_exposes_scale_for_level_replacement_workflows():

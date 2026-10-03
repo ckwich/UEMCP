@@ -5,8 +5,7 @@ description = "UEMCP: observability-first Unreal Engine integration via the Mode
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
-  "mcp[cli]>=1.5.0,<1.6.0",
-  "fastmcp>=0.4.1,<0.5.0",
+  "mcp[cli]>=1.30.0,<2.0.0",
   "uvicorn",
   "fastapi",
   "pydantic>=2.6.1",
