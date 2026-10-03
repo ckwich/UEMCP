@@ -6,12 +6,12 @@ This module provides tools for creating and manipulating Blueprint assets in Unr
 
 import logging
 from typing import Dict, List, Any
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.mcpserver import MCPServer, Context
 
 # Get logger
 logger = logging.getLogger("UnrealMCP")
 
-def register_blueprint_tools(mcp: FastMCP):
+def register_blueprint_tools(mcp: MCPServer):
     """Register Blueprint tools with the MCP server."""
     
     @mcp.tool()

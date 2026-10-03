@@ -20,7 +20,7 @@ def _tool_schema(tool_name: str):
     tools = asyncio.run(run_check())
     for tool in tools:
         if tool.name == tool_name:
-            return tool.inputSchema
+            return tool.input_schema
 
     raise AssertionError(f"Tool not found: {tool_name}")
 

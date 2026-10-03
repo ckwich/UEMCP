@@ -6,7 +6,7 @@ This module provides tools for controlling the Unreal Editor viewport and other 
 
 import logging
 from typing import Dict, List, Any, Optional
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.mcpserver import MCPServer, Context
 
 # Get logger
 logger = logging.getLogger("UnrealMCP")
@@ -27,7 +27,7 @@ def bridge_response_or_error(command: str, response: Optional[Dict[str, Any]]) -
     return bridge_error_response(command, "No response from Unreal Engine")
 
 
-def register_editor_tools(mcp: FastMCP):
+def register_editor_tools(mcp: MCPServer):
     """Register editor tools with the MCP server."""
     
     @mcp.tool()

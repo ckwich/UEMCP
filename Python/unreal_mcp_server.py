@@ -3,10 +3,11 @@
 import logging
 import socket
 import sys
+import threading
 import json
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, Optional
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -49,6 +50,9 @@ class UnrealConnection:
         """Initialize the connection."""
         self.socket = None
         self.connected = False
+        # MCP SDK 2.x runs sync tool handlers on worker threads; serialize
+        # commands so concurrent calls never share or close each other's socket.
+        self._command_lock = threading.Lock()
         self.connect_timeout_seconds = float(connect_timeout_seconds)
         self.receive_timeout_seconds = float(receive_timeout_seconds)
     
@@ -166,6 +170,10 @@ class UnrealConnection:
     
     def send_command(self, command: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         """Send a command to Unreal Engine and get the response."""
+        with self._command_lock:
+            return self._send_command_locked(command, params)
+
+    def _send_command_locked(self, command: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         # Always reconnect for each command, since Unreal closes the connection after each command
         # This is different from Unity which keeps connections alive
         if self.socket:
@@ -255,13 +263,16 @@ class UnrealConnection:
 
 # Global connection state
 _unreal_connection: UnrealConnection = None
+_unreal_connection_init_lock = threading.Lock()
 
 def get_unreal_connection() -> Optional[UnrealConnection]:
     """Get the connection to Unreal Engine."""
     global _unreal_connection
     try:
         if _unreal_connection is None:
-            _unreal_connection = UnrealConnection()
+            with _unreal_connection_init_lock:
+                if _unreal_connection is None:
+                    _unreal_connection = UnrealConnection()
         
         return _unreal_connection
     except Exception as e:
@@ -269,7 +280,7 @@ def get_unreal_connection() -> Optional[UnrealConnection]:
         return None
 
 @asynccontextmanager
-async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
+async def server_lifespan(server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
     """Handle server startup and shutdown."""
     global _unreal_connection
     logger.info("UnrealMCP server starting up")
@@ -292,9 +303,9 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
         logger.info("Unreal MCP server shut down")
 
 # Initialize server
-mcp = FastMCP(
+mcp = MCPServer(
     "UnrealMCP",
-    description="Unreal Engine integration via Model Context Protocol",
+    instructions="Unreal Engine integration via Model Context Protocol",
     lifespan=server_lifespan
 )
 
