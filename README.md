@@ -51,7 +51,7 @@ All these capabilities are accessible through natural language commands via AI a
 - Handles command serialization and response parsing
 - Provides error handling and connection management
 - Loads and registers tool modules from the `tools` directory
-- Uses the FastMCP library to implement the Model Context Protocol
+- Uses the MCP Python SDK (`MCPServer`, formerly FastMCP) to implement the Model Context Protocol
 
 ### Tool Surface Safety
 - Read-only observability is the preferred default for investigation.

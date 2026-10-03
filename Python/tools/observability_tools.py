@@ -9,7 +9,7 @@ from copy import deepcopy
 from threading import Lock
 from typing import Any, Callable, Deque, Dict, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from uemcp_observability import (
     build_error_envelope,
@@ -2478,7 +2478,7 @@ def build_failstate_context(profile_name: str = "failstate") -> Dict[str, Any]:
     )
 
 
-def register_observability_tools(mcp: FastMCP):
+def register_observability_tools(mcp: MCPServer):
     """Register read-mostly observability tools."""
 
     @mcp.tool()

@@ -11,7 +11,7 @@ def _tool_schema(tool_name: str):
     tools = asyncio.run(run_check())
     for tool in tools:
         if tool.name == tool_name:
-            return tool.inputSchema
+            return tool.input_schema
 
     raise AssertionError(f"Tool not found: {tool_name}")
 
@@ -25,8 +25,8 @@ def test_registered_tool_schemas_do_not_expose_context_parameter():
     tools_with_context = [
         tool.name
         for tool in tools
-        if "ctx" in (tool.inputSchema.get("properties") or {})
-        or "ctx" in (tool.inputSchema.get("required") or [])
+        if "ctx" in (tool.input_schema.get("properties") or {})
+        or "ctx" in (tool.input_schema.get("required") or [])
     ]
 
     assert tools_with_context == []
@@ -38,9 +38,9 @@ def test_python_only_tool_can_be_called_without_context_argument():
 
     result = asyncio.run(run_call())
 
-    # mcp>=1.10 returns (content_blocks, structured_content); older SDKs returned the list directly.
-    content = result[0] if isinstance(result, tuple) else result
-    assert content[0].text
+    # mcp 2.x returns a CallToolResult; the tool must succeed and return text content.
+    assert not result.is_error
+    assert result.content[0].text
 
 
 def test_spawn_blueprint_actor_exposes_scale_for_level_replacement_workflows():

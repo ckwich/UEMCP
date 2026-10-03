@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from uemcp_asset_intake import diff_snapshots, write_manifest
 from uemcp_observability import build_error_envelope, build_success_envelope, execute_bridge_command, utc_now
@@ -486,7 +486,7 @@ def build_asset_validate_level_placements(
     )
 
 
-def register_asset_workflow_tools(mcp: FastMCP):
+def register_asset_workflow_tools(mcp: MCPServer):
     """Register interactive asset workflow tools."""
 
     @mcp.tool()

@@ -6,12 +6,12 @@ This module provides tools for manipulating Blueprint graph nodes and connection
 
 import logging
 from typing import Dict, List, Any, Optional
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.mcpserver import MCPServer, Context
 
 # Get logger
 logger = logging.getLogger("UnrealMCP")
 
-def register_blueprint_node_tools(mcp: FastMCP):
+def register_blueprint_node_tools(mcp: MCPServer):
     """Register Blueprint node manipulation tools with the MCP server."""
     
     @mcp.tool()

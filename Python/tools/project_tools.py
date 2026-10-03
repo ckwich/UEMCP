@@ -6,12 +6,12 @@ This module provides tools for managing project-wide settings and configuration.
 
 import logging
 from typing import Dict, Any
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.mcpserver import MCPServer, Context
 
 # Get logger
 logger = logging.getLogger("UnrealMCP")
 
-def register_project_tools(mcp: FastMCP):
+def register_project_tools(mcp: MCPServer):
     """Register project tools with the MCP server."""
     
     @mcp.tool()

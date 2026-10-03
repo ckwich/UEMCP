@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from uemcp_observability import build_error_envelope, build_success_envelope, execute_bridge_command, utc_now
 
@@ -343,7 +343,7 @@ def build_level_validate_construction(
     )
 
 
-def register_level_workflow_tools(mcp: FastMCP):
+def register_level_workflow_tools(mcp: MCPServer):
     """Register editor-owned level workflow tools."""
 
     @mcp.tool()
