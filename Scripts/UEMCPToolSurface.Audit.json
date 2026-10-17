@@ -52,6 +52,9 @@
       "level_construction_plan",
       "level_validate_construction"
     ],
+    "blueprint_read": [
+      "find_blueprint_nodes"
+    ],
     "level_mutation": [
       "spawn_actor",
       "create_actor",

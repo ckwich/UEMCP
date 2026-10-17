@@ -11,4 +11,5 @@ Welcome to the documentation for the Unreal Engine Model Context Protocol (MCP) 
 - [Project Asset Recipes Example](Workflows/project-asset-recipes.example.json) - A neutral profile snippet for project-owned asset intake gates.
 - [Level Map Construction](Workflows/level-map-construction.md) - The editor-owned lane for creating, opening, constructing, saving, and validating maps.
 - [Project Map Recipes Example](Workflows/project-map-recipes.example.json) - A neutral profile snippet for project-owned map construction gates.
+- [Official Unreal MCP](Workflows/official-unreal-mcp.md) - How UEMCP relates to Epic's UE 5.8 server, running both side by side, and the toolset porting roadmap.
 
