@@ -327,7 +327,14 @@ register_editor_tools(mcp)
 register_blueprint_tools(mcp)
 register_blueprint_node_tools(mcp)
 register_project_tools(mcp)
-register_umg_tools(mcp)  
+register_umg_tools(mcp)
+
+# Annotate tools from the safety manifest and apply UEMCP_TOOL_MODE
+# (full by default; "catalog" mirrors Epic's Tool Search meta-tools).
+from uemcp_tool_policy import configure_tool_surface
+
+TOOL_MODE = configure_tool_surface(mcp)
+logger.info("UEMCP tool mode: %s", TOOL_MODE)
 
 @mcp.prompt()
 def info():
